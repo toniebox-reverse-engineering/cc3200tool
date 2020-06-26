@@ -4,11 +4,6 @@ A small tool to write files in TI's CC3200 SimpleLink (TM) filesystem.
 
 Copyright (C) 2016-2020 Allterco Robotics
 
-**NO LONGER ACTIVELY MAINTAINED HERE**
-
-*Forks with CC3220 support exist, but not sure which one works best. @mon has adopted support for CC3200, go to https://github.com/mon/cc3200tool*
-
-
 ![](https://img.shields.io/badge/license-GPL_2-green.svg "License")
 
 ## Rationale
