@@ -2,7 +2,12 @@
 
 A small tool to write files in TI's CC3200 SimpleLink (TM) filesystem.
 
-Copyright (C) 2016 Allterco Robotics
+Copyright (C) 2016-2020 Allterco Robotics
+
+**NO LONGER ACTIVELY MAINTAINED HERE**
+
+*Forks with CC3220 support exist, but not sure which one works best. @mon has adopted support for CC3200, go to https://github.com/mon/cc3200tool*
+
 
 ![](https://img.shields.io/badge/license-GPL_2-green.svg "License")
 
@@ -30,7 +35,7 @@ described in TI's Application Note [CC3100/CC3200 Embedded Programming](http://w
 
 ## Installation
 
-This runs on Python 2.7 with recent [pySerial](https://github.com/pyserial/pyserial).
+This runs on Python >=3.6 with recent [pySerial](https://github.com/pyserial/pyserial).
 
 To install, if you have pip and want system-wide:
 
@@ -54,7 +59,7 @@ then it's just like any other python package:
 ## Usage
 
 You need a serial port connected to the target's UART interface. For
-programming to work, SOP2 needs to be asserted (i.e. tied to GND) and a reset
+programming to work, SOP2 needs to be asserted (i.e. tied to VCC) and a reset
 has to be peformed to switch the chip in bootloader mode. `cc3200tool` can
 optionally use the RTS and DTR lines of the serial port controller to
 automatically perform these actions via the `--sop2` and `--reset` options.
