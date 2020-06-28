@@ -89,5 +89,5 @@ of arguments. Some examples:
     # Reads all files to a directory and creates subdirecty structure
     cc3200tool -p /dev/ttyUSB2 read_all_files extract/
 
-    # Writes all files from a directory and its subdirectories
-    cc3200tool -p /dev/ttyUSB2 write_all_files extract/ --write
+    # Writes all files from a directory and its subdirectories (add --simulate to skip writing)
+    cc3200tool -p /dev/ttyUSB2 write_all_files extract/

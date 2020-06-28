@@ -276,8 +276,8 @@ parser_write_all_files.add_argument(
         "local_dir", type=PathType(exists=True, type='dir'),
         help="local path to read the files from")
 parser_write_all_files.add_argument(
-        "--write", action="store_true",
-        help="Writes the files instead of only showing them")
+        "--simulate", action="store_false",
+        help="List all files to be written and skip writing them")
 
 def dll_data(fname):
     return get_data('cc3200tool', os.path.join('dll', fname))
