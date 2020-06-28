@@ -1209,7 +1209,7 @@ def main():
             cc.read_all_files(command.local_dir)
 
         if command.cmd == "write_all_files":
-            cc.write_all_files(command.local_dir, command.write)
+            cc.write_all_files(command.local_dir, command.simulate)
             check_fat = True
 
 
