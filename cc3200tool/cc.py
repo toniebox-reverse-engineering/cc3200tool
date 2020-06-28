@@ -1,6 +1,6 @@
 #
 # cc3200tool - work with TI's CC3200 SimpleLink (TM) filesystem.
-# Copyright (C) 2016 Allterco Robotics
+# Copyright (C) 2016-2020 Allterco Robotics
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -116,6 +116,63 @@ def pinarg(extra=None):
 def auto_int(x):
     return int(x, 0)
 
+class PathType(object):
+    def __init__(self, exists=True, type='file', dash_ok=True):
+        '''exists:
+                True: a path that does exist
+                False: a path that does not exist, in a valid parent directory
+                None: don't care
+           type: file, dir, symlink, None, or a function returning True for valid paths
+                None: don't care
+           dash_ok: whether to allow "-" as stdin/stdout'''
+
+        assert exists in (True, False, None)
+        assert type in ('file','dir','symlink',None) or hasattr(type,'__call__')
+
+        self._exists = exists
+        self._type = type
+        self._dash_ok = dash_ok
+
+    def __call__(self, string):
+        if string=='-':
+            # the special argument "-" means sys.std{in,out}
+            if self._type == 'dir':
+                raise err('standard input/output (-) not allowed as directory path')
+            elif self._type == 'symlink':
+                raise err('standard input/output (-) not allowed as symlink path')
+            elif not self._dash_ok:
+                raise err('standard input/output (-) not allowed')
+        else:
+            e = os.path.exists(string)
+            if self._exists==True:
+                if not e:
+                    raise err("path does not exist: '%s'" % string)
+
+                if self._type is None:
+                    pass
+                elif self._type=='file':
+                    if not os.path.isfile(string):
+                        raise err("path is not a file: '%s'" % string)
+                elif self._type=='symlink':
+                    if not os.path.symlink(string):
+                        raise err("path is not a symlink: '%s'" % string)
+                elif self._type=='dir':
+                    if not os.path.isdir(string):
+                        raise err("path is not a directory: '%s'" % string)
+                elif not self._type(string):
+                    raise err("path not valid: '%s'" % string)
+            else:
+                if self._exists==False and e:
+                    raise err("path exists: '%s'" % string)
+
+                p = os.path.dirname(os.path.normpath(string)) or '.'
+                if not os.path.isdir(p):
+                    raise err("parent path is not a directory: '%s'" % p)
+                elif not os.path.exists(p):
+                    raise err("parent directory does not exist: '%s'" % p)
+
+        return string
+
 
 # TODO: replace argparse.FileType('rb') with manual file handling
 parser = argparse.ArgumentParser(description='Serial flash utility for CC3200')
@@ -205,6 +262,22 @@ parser_list_filesystem.add_argument(
         "--inactive", action="store_true",
         help="output inactive FAT copy")
 
+parser_read_all_files = subparsers.add_parser(
+        "read_all_files",
+        help="Reads all files into a subfolder structure")
+parser_read_all_files.add_argument(
+        "local_dir", type=PathType(exists=True, type='dir'),
+        help="local path to store the files in")
+
+parser_write_all_files = subparsers.add_parser(
+        "write_all_files",
+        help="Writes all files from a subfolder structure")
+parser_write_all_files.add_argument(
+        "local_dir", type=PathType(exists=True, type='dir'),
+        help="local path to read the files from")
+parser_write_all_files.add_argument(
+        "--simulate", action="store_false",
+        help="List all files to be written and skip writing them")
 
 def dll_data(fname):
     return get_data('cc3200tool', os.path.join('dll', fname))
@@ -1005,6 +1078,35 @@ class CC3200Connection(object):
         fat_info.print_sffs_info()
         if json_output:
             fat_info.print_sffs_info_json()
+    
+    def read_all_files(self, local_dir):
+        fat_info = self.get_fat_info(inactive=False)
+        fat_info.print_sffs_info()
+        for f in fat_info.files:
+            ccname = f.fname
+            if ccname.startswith('/'):
+                ccname = ccname[1:]
+            target_file = os.path.join(local_dir, ccname) 
+            if not os.path.exists(os.path.dirname(target_file)):
+                os.makedirs(name=os.path.dirname(target_file))
+
+            try:
+                self.read_file(f.fname, open(target_file, 'wb', -1))
+            except:
+                log.error("File %s could not be read" % (f.fname))
+
+    def write_all_files(self, local_dir, write=True):
+        for root, dirs, files in os.walk(local_dir):
+            for file in files:
+                filepath = os.path.join(root, file)
+                ccpath = filepath[len(local_dir):]
+                if not ccpath.startswith("/"):
+                    ccpath = "/" + ccpath
+
+                if write:
+                    self.write_file(open(filepath, 'rb', -1), ccpath)
+                else:
+                    log.info("Simulation: Would copy local file %s to cc3200 %s" % (filepath, ccpath))
 
 
 def split_argv(cmdline_args):
@@ -1102,6 +1204,13 @@ def main():
 
         if command.cmd == "list_filesystem":
             cc.list_filesystem(command.json_output, command.inactive)
+
+        if command.cmd == "read_all_files":
+            cc.read_all_files(command.local_dir)
+
+        if command.cmd == "write_all_files":
+            cc.write_all_files(command.local_dir, command.simulate)
+            check_fat = True
 
 
     if check_fat:

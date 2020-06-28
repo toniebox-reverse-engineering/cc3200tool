@@ -2,7 +2,7 @@
 
 A small tool to write files in TI's CC3200 SimpleLink (TM) filesystem.
 
-Copyright (C) 2016 Allterco Robotics
+Copyright (C) 2016-2020 Allterco Robotics
 
 ![](https://img.shields.io/badge/license-GPL_2-green.svg "License")
 
@@ -54,7 +54,7 @@ then it's just like any other python package:
 ## Usage
 
 You need a serial port connected to the target's UART interface. For
-programming to work, SOP2 needs to be asserted (i.e. tied to GND) and a reset
+programming to work, SOP2 needs to be asserted (i.e. tied to VCC) and a reset
 has to be peformed to switch the chip in bootloader mode. `cc3200tool` can
 optionally use the RTS and DTR lines of the serial port controller to
 automatically perform these actions via the `--sop2` and `--reset` options.
@@ -85,3 +85,9 @@ of arguments. Some examples:
 
     # list file and filesystem statistics (occupied and free block sequences)
     cc3200tool -p /dev/ttyUSB2 list_filesystem
+
+    # Reads all files to a directory and creates subdirecty structure
+    cc3200tool -p /dev/ttyUSB2 read_all_files extract/
+
+    # Writes all files from a directory and its subdirectories (add --simulate to skip writing)
+    cc3200tool -p /dev/ttyUSB2 write_all_files extract/
