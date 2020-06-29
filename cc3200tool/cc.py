@@ -242,7 +242,7 @@ parser_write_flash.add_argument(
 parser_read_flash = subparsers.add_parser(
         "read_flash", help="Read SFFS contents into the file")
 parser_read_flash.add_argument(
-        "dump_file", type=argparse.FileType('w+'),
+        "dump_file", type=argparse.FileType('w+b'),
         help="path to store the SFFS dump")
 parser_read_flash.add_argument(
         "--offset", type=auto_int, default=0,
@@ -491,7 +491,7 @@ class CC3x00SffsInfo(object):
             fname = fat_header.fat_bytes[fo_abs:fo_abs + fname_len]
 
             entry = CC3x00SffsStatsFileEntry(i, start_block, size_blocks,
-                                             mirrored, flags, fname)
+                                             mirrored, flags, fname.decode('ascii'))
             self.files.append(entry)
 
             occupied_block_snippets.append((start_block, entry.total_blocks))
