@@ -137,39 +137,39 @@ class PathType(object):
         if string=='-':
             # the special argument "-" means sys.std{in,out}
             if self._type == 'dir':
-                raise err('standard input/output (-) not allowed as directory path')
+                raise CC3200Error('standard input/output (-) not allowed as directory path')
             elif self._type == 'symlink':
-                raise err('standard input/output (-) not allowed as symlink path')
+                raise CC3200Error('standard input/output (-) not allowed as symlink path')
             elif not self._dash_ok:
-                raise err('standard input/output (-) not allowed')
+                raise CC3200Error('standard input/output (-) not allowed')
         else:
             e = os.path.exists(string)
             if self._exists==True:
                 if not e:
-                    raise err("path does not exist: '%s'" % string)
+                    raise CC3200Error("path does not exist: '%s'" % string)
 
                 if self._type is None:
                     pass
                 elif self._type=='file':
                     if not os.path.isfile(string):
-                        raise err("path is not a file: '%s'" % string)
+                        raise CC3200Error("path is not a file: '%s'" % string)
                 elif self._type=='symlink':
                     if not os.path.symlink(string):
-                        raise err("path is not a symlink: '%s'" % string)
+                        raise CC3200Error("path is not a symlink: '%s'" % string)
                 elif self._type=='dir':
                     if not os.path.isdir(string):
-                        raise err("path is not a directory: '%s'" % string)
+                        raise CC3200Error("path is not a directory: '%s'" % string)
                 elif not self._type(string):
-                    raise err("path not valid: '%s'" % string)
+                    raise CC3200Error("path not valid: '%s'" % string)
             else:
                 if self._exists==False and e:
-                    raise err("path exists: '%s'" % string)
+                    raise CC3200Error("path exists: '%s'" % string)
 
                 p = os.path.dirname(os.path.normpath(string)) or '.'
                 if not os.path.isdir(p):
-                    raise err("parent path is not a directory: '%s'" % p)
+                    raise CC3200Error("parent path is not a directory: '%s'" % p)
                 elif not os.path.exists(p):
-                    raise err("parent directory does not exist: '%s'" % p)
+                    raise CC3200Error("parent directory does not exist: '%s'" % p)
 
         return string
 
