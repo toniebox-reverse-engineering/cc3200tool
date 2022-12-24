@@ -181,7 +181,7 @@ parser.add_argument(
         "-p", "--port", type=str, default="/dev/ttyUSB0",
         help="The serial port to use")
 parser.add_argument(
-        "--image_file", type=str, default="none",
+        "-if", "--image_file", type=str, default="none",
         help="Use a image file instead of serial link")
 parser.add_argument(
         "--reset", type=pinarg(['prompt']), default="none",
