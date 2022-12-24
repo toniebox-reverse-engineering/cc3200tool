@@ -567,6 +567,7 @@ class CC3200Connection(object):
     SFFS_FAT_METADATA2_CC3200_OFFSET = 0x774
     SFFS_FAT_METADATA2_CC32XX_OFFSET = 0x2000
     SFFS_FAT_METADATA2_LENGTH = 0x1000
+    SFFS_FAT_PART_OFFSET = 0x1000
 
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
@@ -1063,10 +1064,7 @@ class CC3200Connection(object):
             metadata2_offset = self.SFFS_FAT_METADATA2_CC32XX_OFFSET
             
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
-
-        filenames = self._raw_read(metadata2_offset, metadata2_offset + self.SFFS_FAT_METADATA2_LENGTH,
-                                         storage_id=STORAGE_ID_SFLASH,
-                                         sinfo=sinfo)
+        
         fat_table_bytes = self._raw_read(0, 2 * sinfo.block_size,
                                          storage_id=STORAGE_ID_SFLASH,
                                          sinfo=sinfo)
@@ -1096,6 +1094,11 @@ class CC3200Connection(object):
             fat_hdrs.append(fat_hdr1)
         if fat_hdr2.is_valid:
             fat_hdrs.append(fat_hdr2)
+            metadata2_offset += self.SFFS_FAT_PART_OFFSET
+
+        filenames = self._raw_read(metadata2_offset, metadata2_offset + self.SFFS_FAT_METADATA2_LENGTH,
+                                         storage_id=STORAGE_ID_SFLASH,
+                                         sinfo=sinfo)
 
         if len(fat_hdrs) == 0:
             raise CC3200Error("no valid fat tables found")
