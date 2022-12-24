@@ -181,6 +181,9 @@ parser.add_argument(
         "-p", "--port", type=str, default="/dev/ttyUSB0",
         help="The serial port to use")
 parser.add_argument(
+        "--image_file", type=str, default="none",
+        help="Use a image file instead of serial link")
+parser.add_argument(
         "--reset", type=pinarg(['prompt']), default="none",
         help="dtr, rts, none or prompt, optinally prefixed by ~ to invert")
 parser.add_argument(
@@ -431,10 +434,9 @@ class CC3x00SffsHeader(object):
 
 
 class CC3x00SffsInfo(object):
-    SFFS_FAT_METADATA2_OFFSET = 0x774
-    SFFS_FAT_FILE_NAME_ARRAY_OFFSET = 0x974
+    SFFS_FAT_FILE_NAME_ARRAY_OFFSET = 0x3C0
 
-    def __init__(self, fat_header, storage_info):
+    def __init__(self, fat_header, storage_info, filenames):
         self.fat_commit_revision = fat_header.fat_commit_revision
 
         self.block_size = storage_info.block_size
@@ -484,11 +486,10 @@ class CC3x00SffsInfo(object):
             mirrored = (flags & 0x4) == 0
             start_block = (start_block_msb << 8) + start_block_lsb
 
-            meta2 = fat_header.fat_bytes[self.SFFS_FAT_METADATA2_OFFSET + i * 4:
-                                         self.SFFS_FAT_METADATA2_OFFSET + (i + 1) * 4]
+            meta2 = filenames[i * 4 : (i + 1) * 4]
             fname_offset, fname_len = struct.unpack("<HH", meta2)
             fo_abs = self.SFFS_FAT_FILE_NAME_ARRAY_OFFSET + fname_offset
-            fname = fat_header.fat_bytes[fo_abs:fo_abs + fname_len]
+            fname = filenames[fo_abs:fo_abs + fname_len]
 
             entry = CC3x00SffsStatsFileEntry(i, start_block, size_blocks,
                                              mirrored, flags, fname.decode('ascii'))
@@ -555,13 +556,17 @@ class CustomJsonEncoder(json.JSONEncoder):
 
 
 class CC3200Connection(object):
+    SFFS_FAT_METADATA2_OFFSET = 0x2000
+    SFFS_FAT_METADATA2_LENGTH = 0x1000
 
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
 
-    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT):
+    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, image_file=None):
         self.port = port
-        port.timeout = self.TIMEOUT
+        if not self.port is None:
+            port.timeout = self.TIMEOUT
+        self._image_file = open(image_file, 'rb')
         self._reset = reset
         self._sop2 = sop2
         self._erase_timeout = erase_timeout
@@ -667,9 +672,13 @@ class CC3200Connection(object):
 
     def _get_last_status(self):
         self._send_packet(OPCODE_GET_LAST_STATUS)
-        status = self._read_packet()
-        log.debug("get last status got %s", hexify(status))
-        return CC3x00Status(status[0])
+        
+        if not self.port is None:
+            status = self._read_packet()
+            log.debug("get last status got %s", hexify(status))
+            return CC3x00Status(status[0])
+
+        return CC3x00Status(0)
 
     def _do_break(self, timeout):
         self.port.send_break(.2)
@@ -684,30 +693,40 @@ class CC3200Connection(object):
 
     def _get_version(self):
         self._send_packet(OPCODE_GET_VERSION_INFO)
-        version_data = self._read_packet()
-        if len(version_data) != 28:
-            raise CC3200Error(f"Version info should be 28 bytes, got {len(version_data)}")
-        return CC3x00VersionInfo.from_packet(version_data)
+
+        if not self.port is None:
+            version_data = self._read_packet()
+            if len(version_data) != 28:
+                raise CC3200Error(f"Version info should be 28 bytes, got {len(version_data)}")
+            return CC3x00VersionInfo.from_packet(version_data)
+
+        return CC3x00VersionInfo((0,4,1,2), (0,0,0,0), (0,0,0,0), (0,0,0,0), (16,0,0,0))
 
     def _get_storage_list(self):
         log.info("Getting storage list...")
-        self._send_packet(OPCODE_GET_STORAGE_LIST)
-        with self._serial_timeout(.5):
-            slist_byte = self.port.read(1)
-            if len(slist_byte) != 1:
-                raise CC3200Error("Did not receive storage list byte")
-        return CC3x00StorageList(slist_byte[0])
+        if not self.port is None:
+            self._send_packet(OPCODE_GET_STORAGE_LIST)
+            with self._serial_timeout(.5):
+                slist_byte = self.port.read(1)
+                if len(slist_byte) != 1:
+                    raise CC3200Error("Did not receive storage list byte")
+            return CC3x00StorageList(slist_byte[0])
+
+        return CC3x00StorageList(15)
 
     def _get_storage_info(self, storage_id=STORAGE_ID_SRAM):
         log.info("Getting storage info...")
-        self._send_packet(OPCODE_GET_STORAGE_INFO +
-                          struct.pack(">I", storage_id))
-        sinfo = self._read_packet()
-        if len(sinfo) < 4:
-            raise CC3200Error(f"getting storage info got {len(sinfo)} bytes")
-        log.info("storage #%d info bytes: %s", storage_id, ", "
-                 .join([hex(x) for x in sinfo]))
-        return CC3x00StorageInfo.from_packet(sinfo)
+        if not self.port is None:
+            self._send_packet(OPCODE_GET_STORAGE_INFO +
+                              struct.pack(">I", storage_id))
+            sinfo = self._read_packet()
+            if len(sinfo) < 4:
+                raise CC3200Error(f"getting storage info got {len(sinfo)} bytes")
+            log.info("storage #%d info bytes: %s", storage_id, ", "
+                     .join([hex(x) for x in sinfo]))
+            return CC3x00StorageInfo.from_packet(sinfo)
+
+        return CC3x00StorageInfo(4096, 1024)
 
     def _erase_blocks(self, start, count, storage_id=STORAGE_ID_SRAM):
         command = OPCODE_RAW_STORAGE_ERASE + \
@@ -739,13 +758,19 @@ class CC3200Connection(object):
             return self._raw_write(offset, data, storage_id)
 
     def _read_chunk(self, offset, size, storage_id=STORAGE_ID_SRAM):
-        # log.info("Reading chunk at 0x%x size 0x%x..." % (offset, size))
-        command = OPCODE_RAW_STORAGE_READ + \
-            struct.pack(">III", storage_id, offset, size)
-        self._send_packet(command)
-        data = self._read_packet()
-        if len(data) != size:
-            raise CC3200Error("invalid received size: %d vs %d" % (len(data), size))
+        
+        if not self.port is None:
+            # log.info("Reading chunk at 0x%x size 0x%x..." % (offset, size))
+            command = OPCODE_RAW_STORAGE_READ + \
+                struct.pack(">III", storage_id, offset, size)
+            self._send_packet(command)
+            data = self._read_packet()
+            if len(data) != size:
+                raise CC3200Error("invalid received size: %d vs %d" % (len(data), size))
+            return data
+        
+        self._image_file.seek(offset)
+        data = self._image_file.read(size)
         return data
 
     def _raw_read(self, offset, size, storage_id=STORAGE_ID_SRAM, sinfo=None):
@@ -1026,6 +1051,9 @@ class CC3200Connection(object):
     def get_fat_info(self, inactive=False):
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
 
+        filenames = self._raw_read(self.SFFS_FAT_METADATA2_OFFSET, self.SFFS_FAT_METADATA2_OFFSET + self.SFFS_FAT_METADATA2_LENGTH,
+                                         storage_id=STORAGE_ID_SFLASH,
+                                         sinfo=sinfo)
         fat_table_bytes = self._raw_read(0, 2 * sinfo.block_size,
                                          storage_id=STORAGE_ID_SFLASH,
                                          sinfo=sinfo)
@@ -1071,7 +1099,7 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo)
+        return CC3x00SffsInfo(fat_hdr, sinfo, filenames)
 
     def list_filesystem(self, json_output=False, inactive=False):
         fat_info = self.get_fat_info(inactive=inactive)
@@ -1152,30 +1180,34 @@ def main():
 
     port_name = args.port
 
-    try:
-        p = serial.Serial(
-            port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE)
-    except (Exception, ) as e:
-        log.warn("unable to open serial port %s: %s", port_name, e)
-        sys.exit(-2)
+    if not args.image_file == "none":
+        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, image_file=args.image_file)
+    
+    else:
+        try:
+            p = serial.Serial(
+                port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE)
+        except (Exception, ) as e:
+            log.warn("unable to open serial port %s: %s", port_name, e)
+            sys.exit(-2)
 
-    cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout)
-    try:
-        cc.connect()
-        log.info("connected to target")
-    except (Exception, ) as e:
-        log.error(f"Could not connect to target: {e}")
-        sys.exit(-3)
+        cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout)
+        try:
+            cc.connect()
+            log.info("connected to target")
+        except (Exception, ) as e:
+            log.error(f"Could not connect to target: {e}")
+            sys.exit(-3)
 
-    log.info("Version: %s", cc.vinfo)
+        log.info("Version: %s", cc.vinfo)
 
-    # TODO: sane error handling
+        # TODO: sane error handling
 
-    if cc.vinfo.is_cc3200:
-        log.info("This is a CC3200 device")
-        cc.switch_to_nwp_bootloader()
-        log.info("APPS version: %s", cc.vinfo_apps)
+        if cc.vinfo.is_cc3200:
+            log.info("This is a CC3200 device")
+            cc.switch_to_nwp_bootloader()
+            log.info("APPS version: %s", cc.vinfo_apps)
 
     check_fat = False
 
