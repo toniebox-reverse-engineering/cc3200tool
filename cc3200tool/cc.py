@@ -437,9 +437,10 @@ class CC3x00SffsHeader(object):
 
 
 class CC3x00SffsInfo(object):
-    SFFS_FAT_FILE_NAME_ARRAY_OFFSET = 0x3C0
+    SFFS_FAT_FILE_NAME_ARRAY_CC3200_OFFSET = 0x200
+    SFFS_FAT_FILE_NAME_ARRAY_CC32XX_OFFSET = 0x3C0
 
-    def __init__(self, fat_header, storage_info, filenames):
+    def __init__(self, fat_header, storage_info, filenames, device):
         self.fat_commit_revision = fat_header.fat_commit_revision
 
         self.block_size = storage_info.block_size
@@ -451,6 +452,10 @@ class CC3x00SffsInfo(object):
         occupied_block_snippets.append((0, 5))
 
         self.files = []
+        
+        file_name_array_offset = self.SFFS_FAT_FILE_NAME_ARRAY_CC3200_OFFSET
+        if device == "cc32xx":
+            file_name_array_offset = self.SFFS_FAT_FILE_NAME_ARRAY_CC32XX_OFFSET
 
         """
         TI's doc: "Total number of files is limited to 128 files, including
@@ -491,7 +496,7 @@ class CC3x00SffsInfo(object):
 
             meta2 = filenames[i * 4 : (i + 1) * 4]
             fname_offset, fname_len = struct.unpack("<HH", meta2)
-            fo_abs = self.SFFS_FAT_FILE_NAME_ARRAY_OFFSET + fname_offset
+            fo_abs = file_name_array_offset + fname_offset
             fname = filenames[fo_abs:fo_abs + fname_len]
 
             entry = CC3x00SffsStatsFileEntry(i, start_block, size_blocks,
