@@ -195,6 +195,9 @@ parser.add_argument(
 parser.add_argument(
         "--reboot-to-app", action="store_true",
         help="When finished, reboot to the application")
+parser.add_argument(
+        "-d", "--device", type=str, default="cc3200",
+        help="Device to select cc3200/cc32xx (to decide which offsets to use)")
 
 subparsers = parser.add_subparsers(dest="cmd")
 
@@ -556,7 +559,8 @@ class CustomJsonEncoder(json.JSONEncoder):
 
 
 class CC3200Connection(object):
-    SFFS_FAT_METADATA2_OFFSET = 0x2000
+    SFFS_FAT_METADATA2_CC3200_OFFSET = 0x774
+    SFFS_FAT_METADATA2_CC32XX_OFFSET = 0x2000
     SFFS_FAT_METADATA2_LENGTH = 0x1000
 
     TIMEOUT = 5
@@ -1048,10 +1052,14 @@ class CC3200Connection(object):
         data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH)
         image_file.write(data)
 
-    def get_fat_info(self, inactive=False):
+    def get_fat_info(self, device, inactive=False):
+        metadata2_offset = self.SFFS_FAT_METADATA2_CC3200_OFFSET
+        if device == "cc32xx":
+            metadata2_offset = self.SFFS_FAT_METADATA2_CC32XX_OFFSET
+            
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
 
-        filenames = self._raw_read(self.SFFS_FAT_METADATA2_OFFSET, self.SFFS_FAT_METADATA2_OFFSET + self.SFFS_FAT_METADATA2_LENGTH,
+        filenames = self._raw_read(metadata2_offset, metadata2_offset + self.SFFS_FAT_METADATA2_LENGTH,
                                          storage_id=STORAGE_ID_SFLASH,
                                          sinfo=sinfo)
         fat_table_bytes = self._raw_read(0, 2 * sinfo.block_size,
@@ -1099,16 +1107,16 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo, filenames)
+        return CC3x00SffsInfo(fat_hdr, sinfo, filenames, device)
 
-    def list_filesystem(self, json_output=False, inactive=False):
-        fat_info = self.get_fat_info(inactive=inactive)
+    def list_filesystem(self, device, json_output=False, inactive=False):
+        fat_info = self.get_fat_info(device=device, inactive=inactive)
         fat_info.print_sffs_info()
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, local_dir):
-        fat_info = self.get_fat_info(inactive=False)
+    def read_all_files(self, device, local_dir):
+        fat_info = self.get_fat_info(device=device, inactive=False)
         fat_info.print_sffs_info()
         for f in fat_info.files:
             ccname = f.fname
@@ -1235,10 +1243,10 @@ def main():
             cc.read_flash(command.dump_file, command.offset, command.size)
 
         if command.cmd == "list_filesystem":
-            cc.list_filesystem(command.json_output, command.inactive)
+            cc.list_filesystem(command.device, command.json_output, command.inactive)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.local_dir)
+            cc.read_all_files(command.device, command.local_dir)
 
         if command.cmd == "write_all_files":
             cc.write_all_files(command.local_dir, command.simulate)
@@ -1246,7 +1254,7 @@ def main():
 
 
     if check_fat:
-        fat_info = cc.get_fat_info()  # check FAT after each write_file operation
+        fat_info = cc.get_fat_info(device=command.device)  # check FAT after each write_file operation
         fat_info.print_sffs_info_short()
 
     if args.reboot_to_app:
