@@ -440,7 +440,7 @@ class CC3x00SffsInfo(object):
     SFFS_FAT_FILE_NAME_ARRAY_CC3200_OFFSET = 0x200
     SFFS_FAT_FILE_NAME_ARRAY_CC32XX_OFFSET = 0x3C0
 
-    def __init__(self, fat_header, storage_info, filenames, device):
+    def __init__(self, fat_header, storage_info, meta2, device):
         self.fat_commit_revision = fat_header.fat_commit_revision
 
         self.block_size = storage_info.block_size
@@ -494,10 +494,10 @@ class CC3x00SffsInfo(object):
             mirrored = (flags & 0x4) == 0
             start_block = (start_block_msb << 8) + start_block_lsb
 
-            meta2 = filenames[i * 4 : (i + 1) * 4]
-            fname_offset, fname_len = struct.unpack("<HH", meta2)
+            meta2_e = meta2[i * 4 : (i + 1) * 4]
+            fname_offset, fname_len = struct.unpack("<HH", meta2_e)
             fo_abs = file_name_array_offset + fname_offset
-            fname = filenames[fo_abs:fo_abs + fname_len]
+            fname = meta2[fo_abs:fo_abs + fname_len]
 
             entry = CC3x00SffsStatsFileEntry(i, start_block, size_blocks,
                                              mirrored, flags, fname.decode('ascii'))
@@ -1096,7 +1096,7 @@ class CC3200Connection(object):
             fat_hdrs.append(fat_hdr2)
             metadata2_offset += self.SFFS_FAT_PART_OFFSET
 
-        filenames = self._raw_read(metadata2_offset, metadata2_offset + self.SFFS_FAT_METADATA2_LENGTH,
+        meta2 = self._raw_read(metadata2_offset, metadata2_offset + self.SFFS_FAT_METADATA2_LENGTH,
                                          storage_id=STORAGE_ID_SFLASH,
                                          sinfo=sinfo)
 
@@ -1115,7 +1115,7 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo, filenames, device)
+        return CC3x00SffsInfo(fat_hdr, sinfo, meta2, device)
 
     def list_filesystem(self, device, json_output=False, inactive=False):
         fat_info = self.get_fat_info(device=device, inactive=inactive)
