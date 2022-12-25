@@ -1,4 +1,4 @@
-# CC3200 Tool
+# CC3200 Tool v1.1.0
 
 A small tool to read and write files in TI's CC3200 SimpleLink (TM) filesystem.
 Partial support for the CC32XX (CC3230/CC3235) series (via flash image)
