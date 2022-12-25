@@ -825,14 +825,24 @@ class CC3200Connection(object):
         self._send_packet(OPCODE_EXEC_FROM_RAM)
 
     def _get_file_info(self, filename):
-        command = OPCODE_GET_FILE_INFO \
-            + struct.pack(">I", len(filename)) \
-            + filename.encode()
-        self._send_packet(command)
-        finfo = self._read_packet()
-        if len(finfo) < 5:
-            raise CC3200Error()
-        return CC3x00FileInfo.from_packet(finfo)
+        if not self.port is None:
+            command = OPCODE_GET_FILE_INFO \
+                + struct.pack(">I", len(filename)) \
+                + filename.encode()
+            self._send_packet(command)
+            finfo = self._read_packet()
+            if len(finfo) < 5:
+                raise CC3200Error()
+            return CC3x00FileInfo.from_packet(finfo)
+        
+        fat_info = self.get_fat_info(inactive=False)
+        finfo = CC3x00FileInfo(exists=False, size=0)
+        for file in fat_info.files:
+            if file.fname == filename:
+                finfo = CC3x00FileInfo(exists=True, size=file.size_blocks*SLFS_BLOCK_SIZE)
+                break
+        return finfo
+    
 
     def _open_file_for_write(self, filename, file_len, fs_flags=None):
         for bsize_idx, bsize in enumerate(FLASH_BLOCK_SIZES):
@@ -1029,21 +1039,39 @@ class CC3200Connection(object):
 
         log.info("Reading file %s -> %s", cc_fname, local_file.name)
 
-        self._open_file_for_read(cc_fname)
+        if not self.port is None:
+            self._open_file_for_read(cc_fname)
 
-        pos = 0
-        while pos < finfo.size:
-            toread = min(finfo.size - pos, SLFS_BLOCK_SIZE)
-            command = OPCODE_READ_FILE_CHUNK + struct.pack(">II", pos, toread)
-            self._send_packet(command)
-            resp = self._read_packet()
-            if len(resp) != toread:
-                raise CC3200Error("reading chunk failed")
+            pos = 0
+            while pos < finfo.size:
+                toread = min(finfo.size - pos, SLFS_BLOCK_SIZE)
+                command = OPCODE_READ_FILE_CHUNK + struct.pack(">II", pos, toread)
+                self._send_packet(command)
+                resp = self._read_packet()
+                if len(resp) != toread:
+                    raise CC3200Error("reading chunk failed")
 
-            local_file.write(resp)
-            pos += toread
+                local_file.write(resp)
+                pos += toread
 
-        self._close_file()
+            self._close_file()
+            return
+        
+        fat_info = self.get_fat_info(inactive=False)
+        filefinfo = None
+        for file in fat_info.files:
+            if file.fname == cc_fname:
+                filefinfo = file
+                break
+            
+        header_size = 8
+        sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
+        fatfs_offset = filefinfo.start_block*fat_info.block_size
+        fileheader = self._raw_read(fatfs_offset, header_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+        file_size = fileheader[2]<<16 | fileheader[1]<<8 | fileheader[0]<<0 
+        
+        data = self._raw_read(header_size+fatfs_offset, file_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+        local_file.write(data)                
 
     def write_flash(self, image, erase=True):
         data = image.read()
