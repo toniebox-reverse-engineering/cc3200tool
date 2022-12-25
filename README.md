@@ -100,3 +100,9 @@ of arguments. Some examples:
 
     # list filesystem from a cc3230/cc3235 flashdump
     cc3200tool -if cc32xx-flash.bin -d cc32xx list_filesystem
+
+    # dump a file from a flashdump
+    cc3200tool -if cc3200-flash.bin read_file /sys/mcuimg.bin
+
+    # Reads all files to a directory and creates subdirecty structure from a flashdump
+    cc3200tool -if cc3200-flash.bin read_all_files extract/
