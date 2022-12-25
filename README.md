@@ -4,6 +4,7 @@ A small tool to read and write files in TI's CC3200 SimpleLink (TM) filesystem.
 Partial support for the CC32XX (CC3230/CC3235) series (via flash image)
 
 Copyright (C) 2016-2020 Allterco Robotics
+
 Copyright (C) 2020- Team RevvoX (0xbadbee, g3gg0)
 
 ![](https://img.shields.io/badge/license-GPL_2-green.svg "License")
