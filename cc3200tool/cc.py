@@ -737,7 +737,7 @@ class CC3200Connection(object):
                      .join([hex(x) for x in sinfo]))
             return CC3x00StorageInfo.from_packet(sinfo)
 
-        return CC3x00StorageInfo(4096, 1024)
+        return CC3x00StorageInfo(SLFS_BLOCK_SIZE, 1024) #TODO: as parameter
 
     def _erase_blocks(self, start, count, storage_id=STORAGE_ID_SRAM):
         command = OPCODE_RAW_STORAGE_ERASE + \
