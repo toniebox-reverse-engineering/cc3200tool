@@ -572,10 +572,11 @@ class CC3200Connection(object):
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
 
-    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, image_file=None):
+    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None):
         self.port = port
         if not self.port is None:
             port.timeout = self.TIMEOUT
+        self._device = device
         self._image_file = open(image_file, 'rb')
         self._reset = reset
         self._sop2 = sop2
@@ -1058,9 +1059,9 @@ class CC3200Connection(object):
         data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH)
         image_file.write(data)
 
-    def get_fat_info(self, device, inactive=False):
+    def get_fat_info(self, inactive=False):
         metadata2_offset = self.SFFS_FAT_METADATA2_CC3200_OFFSET
-        if device == "cc32xx":
+        if self._device == "cc32xx":
             metadata2_offset = self.SFFS_FAT_METADATA2_CC32XX_OFFSET
             
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
@@ -1115,16 +1116,16 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo, meta2, device)
+        return CC3x00SffsInfo(fat_hdr, sinfo, meta2, self._device)
 
-    def list_filesystem(self, device, json_output=False, inactive=False):
-        fat_info = self.get_fat_info(device=device, inactive=inactive)
+    def list_filesystem(self, json_output=False, inactive=False):
+        fat_info = self.get_fat_info(inactive=inactive)
         fat_info.print_sffs_info()
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, device, local_dir):
-        fat_info = self.get_fat_info(device=device, inactive=False)
+    def read_all_files(self, local_dir):
+        fat_info = self.get_fat_info(inactive=False)
         fat_info.print_sffs_info()
         for f in fat_info.files:
             ccname = f.fname
@@ -1197,7 +1198,7 @@ def main():
     port_name = args.port
 
     if not args.image_file == "none":
-        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, image_file=args.image_file)
+        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, device=args.device, image_file=args.image_file)
     
     else:
         try:
@@ -1251,10 +1252,10 @@ def main():
             cc.read_flash(command.dump_file, command.offset, command.size)
 
         if command.cmd == "list_filesystem":
-            cc.list_filesystem(command.device, command.json_output, command.inactive)
+            cc.list_filesystem(command.json_output, command.inactive)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.device, command.local_dir)
+            cc.read_all_files(command.local_dir)
 
         if command.cmd == "write_all_files":
             cc.write_all_files(command.local_dir, command.simulate)
