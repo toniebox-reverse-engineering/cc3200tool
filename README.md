@@ -37,11 +37,11 @@ This runs on Python >=3.6 with recent [pySerial](https://github.com/pyserial/pys
 
 To install, if you have pip and want system-wide:
 
-    pip install git+git://github.com/mon/cc3200tool.git
+    pip install git+git://github.com/toniebox-reverse-engineering/cc3200tool.git
 
 or clone this repǫ
 
-    git clone http://github.com/mon/cc3200tool.git
+    git clone http://github.com/toniebox-reverse-engineering/cc3200tool.git
     cd cc3200tool
 
 then it's just like any other python package:
@@ -89,7 +89,7 @@ of arguments. Some examples:
     # list file and filesystem statistics (occupied and free block sequences)
     cc3200tool -p /dev/ttyUSB2 list_filesystem
 
-    # Reads all files to a directory and creates subdirectory structure
+    # Reads all files to a directory and creates subdirecty structure
     cc3200tool -p /dev/ttyUSB2 read_all_files extract/
 
     # Writes all files from a directory and its subdirectories (add --simulate to skip writing)
