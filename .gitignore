@@ -1,3 +1,16 @@
 env/
 *.py[c|o]
 *.egg-info/
+cc3200tool-env/
+scripts/extract/
+build/
+cc3200tool/time
+cc3200tool/sys
+cc3200tool/struct
+cc3200tool/serial
+cc3200tool/os
+cc3200tool/math
+cc3200tool/logging
+cc3200tool/json
+test/
+.vscode/

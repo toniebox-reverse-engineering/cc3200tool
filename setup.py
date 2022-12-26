@@ -2,11 +2,11 @@ from distutils.core import setup
 
 setup(
     name="cc3200tool",
-    version="1.0.0",
-    description="A tool to upload files to TI CC3200",
-    author="Kiril Zyapkov",
+    version="1.1.0",
+    description="A tool to down-/upload files form/to TI CC3200",
+    author="Kiril Zyapkov, 0xbadbee",
     author_email="k.zyapkov@allterco.com",
-    url="http://github.com/allterco/cc3200tool",
+    url="https://github.com/toniebox-reverse-engineering/cc3200tool",
     packages=['cc3200tool'],
     package_data={'cc3200tool': ['dll/*.dll']},
     entry_points = {

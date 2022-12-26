@@ -1,8 +1,11 @@
-# CC3200 Tool
+# CC3200 Tool v1.1.0
 
-A small tool to write files in TI's CC3200 SimpleLink (TM) filesystem.
+A small tool to read and write files in TI's CC3200 SimpleLink (TM) filesystem.
+Partial support for the CC32XX (CC3230/CC3235) series (via flash image)
 
 Copyright (C) 2016-2020 Allterco Robotics
+
+Copyright (C) 2020- Team RevvoX (0xbadbee, g3gg0)
 
 ![](https://img.shields.io/badge/license-GPL_2-green.svg "License")
 
@@ -91,3 +94,15 @@ of arguments. Some examples:
 
     # Writes all files from a directory and its subdirectories (add --simulate to skip writing)
     cc3200tool -p /dev/ttyUSB2 write_all_files extract/
+
+    # list filesystem from a flashdump
+    cc3200tool -if cc3200-flash.bin list_filesystem
+
+    # list filesystem from a cc3230/cc3235 flashdump
+    cc3200tool -if cc32xx-flash.bin -d cc32xx list_filesystem
+
+    # dump a file from a flashdump
+    cc3200tool -if cc3200-flash.bin read_file /sys/mcuimg.bin
+
+    # Reads all files to a directory and creates subdirecty structure from a flashdump
+    cc3200tool -if cc3200-flash.bin read_all_files extract/
