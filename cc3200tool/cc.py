@@ -1294,7 +1294,7 @@ class CC3200Connection(object):
             except Exception as ex:
                 log.error("File %s could not be read, %s" % (f.fname, str (ex)))
 
-    def write_all_files(self, local_dir, write=True):
+    def write_all_files(self, local_dir, write=True, use_api=True):
         for root, dirs, files in os.walk(local_dir):
             for file in files:
                 filepath = os.path.join(root, file)
@@ -1303,7 +1303,7 @@ class CC3200Connection(object):
                     ccpath = "/" + ccpath
 
                 if write:
-                    self.write_file(open(filepath, 'rb', -1), ccpath)
+                    self.write_file(local_file=open(filepath, 'rb', -1), cc_filename=ccpath, use_api=use_api)
                 else:
                     log.info("Simulation: Would copy local file %s to cc3200 %s" % (filepath, ccpath))
 
@@ -1417,7 +1417,11 @@ def main():
             cc.read_all_files(command.local_dir, command.by_file_id)
 
         if command.cmd == "write_all_files":
-            cc.write_all_files(command.local_dir, command.simulate)
+            use_api = True
+            if not command.image_file is None and not command.output_file is None:
+                use_api = False
+                cc.copy_input_file_to_output_file()
+            cc.write_all_files(command.local_dir, command.simulate, use_api)
             check_fat = True
 
 
