@@ -236,7 +236,7 @@ parser_read_file.add_argument(
         "local_file", type=argparse.FileType('wb'),
         help="local path to store the file contents in")
 parser_read_file.add_argument(
-        "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id (image_file only!)")
+        "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id")
 
 parser_write_flash = subparsers.add_parser(
         "write_flash", help="Write a Gang image on the flash")
@@ -863,7 +863,7 @@ class CC3200Connection(object):
         self._send_packet(OPCODE_EXEC_FROM_RAM)
 
     def _get_file_info(self, filename, file_id=-1):
-        if not self.port is None:
+        if not self.port is None and file_id == -1:
             command = OPCODE_GET_FILE_INFO \
                 + struct.pack(">I", len(filename)) \
                 + filename.encode()
@@ -1081,7 +1081,7 @@ class CC3200Connection(object):
 
         log.info("Reading file %s -> %s", cc_fname, local_file.name)
 
-        if not self.port is None:
+        if not self.port is None and file_id == -1:
             self._open_file_for_read(cc_fname)
 
             pos = 0
