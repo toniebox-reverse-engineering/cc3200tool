@@ -1350,7 +1350,7 @@ def main():
 
 
     if check_fat:
-        fat_info = cc.get_fat_info(device=command.device)  # check FAT after each write_file operation
+        fat_info = cc.get_fat_info()  # check FAT after each write_file operation
         fat_info.print_sffs_info_short()
 
     if args.reboot_to_app:
