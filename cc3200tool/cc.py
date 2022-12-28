@@ -1204,9 +1204,8 @@ class CC3200Connection(object):
                 os.makedirs(name=os.path.dirname(target_file))
 
             try:
-                self.read_file(f.fname, open(target_file, 'wb', -1))
-            except:
-                log.error("File %s could not be read" % (f.fname))
+            except Exception as ex:
+                log.error("File %s could not be read, %s" % (f.fname, str (ex)))
 
     def write_all_files(self, local_dir, write=True):
         for root, dirs, files in os.walk(local_dir):
