@@ -267,6 +267,9 @@ parser_list_filesystem.add_argument(
 parser_list_filesystem.add_argument(
         "--inactive", action="store_true",
         help="output inactive FAT copy")
+parser_list_filesystem.add_argument(
+        "--extended", action="store_true",
+        help="Read file header and show size in bytes")
 
 parser_read_all_files = subparsers.add_parser(
         "read_all_files",
@@ -384,7 +387,7 @@ class CC3x00FileInfo(object):
 
 
 class CC3x00SffsStatsFileEntry(object):
-    def __init__(self, index, start_block, size_blocks, mirrored, flags, fname):
+    def __init__(self, index, start_block, size_blocks, mirrored, flags, fname, header=None):
         self.index = index
         self.start_block = start_block
         self.size_blocks = size_blocks
@@ -395,6 +398,21 @@ class CC3x00SffsStatsFileEntry(object):
         self.total_blocks = self.size_blocks
         if self.mirrored:
             self.total_blocks = self.total_blocks * 2
+            
+        self.header = header
+        self.magic = None
+        self.size = 0
+        if header != None:
+            self.read_header(header)
+            
+    def read_header(self, header):
+        self.size = header[2]<<16 | header[1]<<8 | header[0]<<0 
+        self.magic = bytearray(header[3:])
+        
+    def get_magic(self):
+        ##fileheader[6:7] 4c 53
+        return ''.join('{:02x}'.format(x) for x in self.magic)
+        
 
 
 class CC3x00SffsHole(object):
@@ -524,19 +542,33 @@ class CC3x00SffsInfo(object):
                 self.holes.append(hole)
             prev_end_block = snippet[0] + snippet[1]
 
-    def print_sffs_info(self):
+    def print_sffs_info(self, extended=False):
         log.info("Serial Flash block size:\t%d bytes", self.block_size)
         log.info("Serial Flash capacity:\t%d blocks", self.block_count)
         log.info("")
-        log.info("\tfile\tstart\tsize\tfail\tflags\ttotal size\tfilename")
-        log.info("\tindex\tblock\t[BLKs]\tsafe\t\t[BLKs]")
-        log.info("----------------------------------------------------------------------------")
-        log.info("\tN/A\t0\t5\tN/A\tN/A\t5\t\tFATFS")
+        
+        if extended:
+            log.info("\tfile\tstart\tsize\tsize\tfail\tflags\ttotal\tmagic\t\tfilename")
+            log.info("\tindex\tblock\t[BLKs]\t[bytes]\tsafe\t\t[BLKs]")
+            log.info("-------------------------------------------------------------------------------------------------")
+            log.info("\tN/A\t0\t5\tN/A\tN/A\t5\tN/A\tN/A\t\tFATFS")
+        else:
+            log.info("\tfile\tstart\tsize\tfail\tflags\ttotal\tfilename")
+            log.info("\tindex\tblock\t[BLKs]\tsafe\t[BLKs]")
+            log.info("----------------------------------------------------------------------------")
+            log.info("\tN/A\t0\t5\tN/A\tN/A\t5\tFATFS")
+            
         for f in self.files:
-            log.info("\t%d\t%d\t%d\t%s\t0x%x\t%d\t\t%s" %
-                     (f.index, f.start_block, f.size_blocks,
-                      f.mirrored and "yes" or "no",
-                      f.flags, f.total_blocks, f.fname))
+            if extended:
+                log.info("\t%d\t%d\t%d\t%d\t%s\t0x%x\t%d\t%s\t%s" %
+                        (f.index, f.start_block, f.size_blocks, f.size,
+                        f.mirrored and "yes" or "no",
+                        f.flags, f.total_blocks, f.get_magic(), f.fname))
+            else:
+                log.info("\t%d\t%d\t%d\t%s\t0x%x\t%d\t%s" %
+                        (f.index, f.start_block, f.size_blocks,
+                        f.mirrored and "yes" or "no",
+                        f.flags, f.total_blocks, f.fname))
 
         log.info("")
         log.info("   Flash usage")
@@ -568,6 +600,7 @@ class CC3200Connection(object):
     SFFS_FAT_METADATA2_CC32XX_OFFSET = 0x2000
     SFFS_FAT_METADATA2_LENGTH = 0x1000
     SFFS_FAT_PART_OFFSET = 0x1000
+    SFFS_FAT_FILE_HEADER_SIZE = 0x8
 
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
@@ -1057,7 +1090,7 @@ class CC3200Connection(object):
             self._close_file()
             return
         
-        fat_info = self.get_fat_info(inactive=False)
+        fat_info = self.get_fat_info(inactive=False, extended=True)
         filefinfo = None
         for file in fat_info.files:
             if file.fname == cc_fname:
@@ -1066,12 +1099,9 @@ class CC3200Connection(object):
             
         header_size = 8
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
-        fatfs_offset = filefinfo.start_block*fat_info.block_size
-        fileheader = self._raw_read(fatfs_offset, header_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
-        file_size = fileheader[2]<<16 | fileheader[1]<<8 | fileheader[0]<<0 
-        
-        data = self._raw_read(header_size+fatfs_offset, file_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
-        local_file.write(data)                
+        fatfs_offset = filefinfo.start_block*fat_info.block_size        
+        data = self._raw_read(header_size+fatfs_offset, filefinfo.size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+        local_file.write(data) 
 
     def write_flash(self, image, erase=True):
         data = image.read()
@@ -1087,7 +1117,7 @@ class CC3200Connection(object):
         data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH)
         image_file.write(data)
 
-    def get_fat_info(self, inactive=False):
+    def get_fat_info(self, inactive=False, extended=False):
         metadata2_offset = self.SFFS_FAT_METADATA2_CC3200_OFFSET
         if self._device == "cc32xx":
             metadata2_offset = self.SFFS_FAT_METADATA2_CC32XX_OFFSET
@@ -1144,11 +1174,21 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo, meta2, self._device)
+        
+        
+        fat_info = CC3x00SffsInfo(fat_hdr, sinfo, meta2, self._device)
+        
+        if extended:
+            for file in fat_info.files:
+                fatfs_offset = file.start_block*sinfo.block_size
+                fileheader = self._raw_read(fatfs_offset, self.SFFS_FAT_FILE_HEADER_SIZE, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+                file.read_header(fileheader)
+        
+        return fat_info
 
-    def list_filesystem(self, json_output=False, inactive=False):
-        fat_info = self.get_fat_info(inactive=inactive)
-        fat_info.print_sffs_info()
+    def list_filesystem(self, json_output=False, inactive=False, extended=False):
+        fat_info = self.get_fat_info(inactive=inactive, extended=extended)
+        fat_info.print_sffs_info(extended)
         if json_output:
             fat_info.print_sffs_info_json()
     
@@ -1280,7 +1320,7 @@ def main():
             cc.read_flash(command.dump_file, command.offset, command.size)
 
         if command.cmd == "list_filesystem":
-            cc.list_filesystem(command.json_output, command.inactive)
+            cc.list_filesystem(command.json_output, command.inactive, command.extended)
 
         if command.cmd == "read_all_files":
             cc.read_all_files(command.local_dir)
