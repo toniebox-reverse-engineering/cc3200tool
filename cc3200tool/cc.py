@@ -806,6 +806,7 @@ class CC3200Connection(object):
             command = OPCODE_RAW_STORAGE_WRITE + \
                 struct.pack(">III", storage_id, offset, len(data))
             self._send_packet(command + data)
+            return
         self._output_file.seek(offset)
         self._output_file.write(data)
 
