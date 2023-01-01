@@ -181,8 +181,11 @@ parser.add_argument(
         "-p", "--port", type=str, default="/dev/ttyUSB0",
         help="The serial port to use")
 parser.add_argument(
-        "-if", "--image_file", type=str, default="none",
-        help="Use a image file instead of serial link")
+        "-if", "--image_file", type=str, default=None,
+        help="Use a image file instead of serial link (read)")
+parser.add_argument(
+        "-of", "--output_file", type=str, default=None,
+        help="Use a image file instead of serial link (write)")
 parser.add_argument(
         "--reset", type=pinarg(['prompt']), default="none",
         help="dtr, rts, none or prompt, optinally prefixed by ~ to invert")
@@ -227,6 +230,8 @@ parser_write_file.add_argument(
 parser_write_file.add_argument(
         "--commit-flag", action="store_true",
         help="enables fail safe MIRROR feature")
+parser_write_file.add_argument(
+        "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id (image_file only!)")
 
 parser_read_file = subparsers.add_parser(
         "read_file", help="read a file from the SL filesystem")
@@ -235,6 +240,8 @@ parser_read_file.add_argument(
 parser_read_file.add_argument(
         "local_file", type=argparse.FileType('wb'),
         help="local path to store the file contents in")
+parser_read_file.add_argument(
+        "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id")
 
 parser_write_flash = subparsers.add_parser(
         "write_flash", help="Write a Gang image on the flash")
@@ -267,6 +274,9 @@ parser_list_filesystem.add_argument(
 parser_list_filesystem.add_argument(
         "--inactive", action="store_true",
         help="output inactive FAT copy")
+parser_list_filesystem.add_argument(
+        "--extended", action="store_true",
+        help="Read file header and show size in bytes")
 
 parser_read_all_files = subparsers.add_parser(
         "read_all_files",
@@ -274,6 +284,9 @@ parser_read_all_files = subparsers.add_parser(
 parser_read_all_files.add_argument(
         "local_dir", type=PathType(exists=True, type='dir'),
         help="local path to store the files in")
+parser_read_all_files.add_argument(
+        "--by-file-id", action="store_true",
+        help="Read unknown filenames by its id")
 
 parser_write_all_files = subparsers.add_parser(
         "write_all_files",
@@ -384,7 +397,7 @@ class CC3x00FileInfo(object):
 
 
 class CC3x00SffsStatsFileEntry(object):
-    def __init__(self, index, start_block, size_blocks, mirrored, flags, fname):
+    def __init__(self, index, start_block, size_blocks, mirrored, flags, fname, header=None):
         self.index = index
         self.start_block = start_block
         self.size_blocks = size_blocks
@@ -395,6 +408,22 @@ class CC3x00SffsStatsFileEntry(object):
         self.total_blocks = self.size_blocks
         if self.mirrored:
             self.total_blocks = self.total_blocks * 2
+            
+        self.header = header
+        self.magic = None
+        self.size = 0
+        if header != None:
+            self.read_header(header)
+            
+    def read_header(self, header):
+        self.header = header
+        self.size = header[2]<<16 | header[1]<<8 | header[0]<<0 
+        self.magic = bytearray(header[3:])
+        
+    def get_magic(self):
+        ##fileheader[6:7] 4c 53
+        return ''.join('{:02x}'.format(x) for x in self.magic)
+        
 
 
 class CC3x00SffsHole(object):
@@ -524,19 +553,33 @@ class CC3x00SffsInfo(object):
                 self.holes.append(hole)
             prev_end_block = snippet[0] + snippet[1]
 
-    def print_sffs_info(self):
+    def print_sffs_info(self, extended=False):
         log.info("Serial Flash block size:\t%d bytes", self.block_size)
         log.info("Serial Flash capacity:\t%d blocks", self.block_count)
         log.info("")
-        log.info("\tfile\tstart\tsize\tfail\tflags\ttotal size\tfilename")
-        log.info("\tindex\tblock\t[BLKs]\tsafe\t\t[BLKs]")
-        log.info("----------------------------------------------------------------------------")
-        log.info("\tN/A\t0\t5\tN/A\tN/A\t5\t\tFATFS")
+        
+        if extended:
+            log.info("\tfile\tstart\tsize\tsize\tfail\tflags\ttotal\tmagic\t\tfilename")
+            log.info("\tindex\tblock\t[BLKs]\t[bytes]\tsafe\t\t[BLKs]")
+            log.info("-------------------------------------------------------------------------------------------------")
+            log.info("\tN/A\t0\t5\tN/A\tN/A\t5\tN/A\tN/A\t\tFATFS")
+        else:
+            log.info("\tfile\tstart\tsize\tfail\tflags\ttotal\tfilename")
+            log.info("\tindex\tblock\t[BLKs]\tsafe\t[BLKs]")
+            log.info("----------------------------------------------------------------------------")
+            log.info("\tN/A\t0\t5\tN/A\tN/A\t5\tFATFS")
+            
         for f in self.files:
-            log.info("\t%d\t%d\t%d\t%s\t0x%x\t%d\t\t%s" %
-                     (f.index, f.start_block, f.size_blocks,
-                      f.mirrored and "yes" or "no",
-                      f.flags, f.total_blocks, f.fname))
+            if extended:
+                log.info("\t%d\t%d\t%d\t%d\t%s\t0x%x\t%d\t%s\t%s" %
+                        (f.index, f.start_block, f.size_blocks, f.size,
+                        f.mirrored and "yes" or "no",
+                        f.flags, f.total_blocks, f.get_magic(), f.fname))
+            else:
+                log.info("\t%d\t%d\t%d\t%s\t0x%x\t%d\t%s" %
+                        (f.index, f.start_block, f.size_blocks,
+                        f.mirrored and "yes" or "no",
+                        f.flags, f.total_blocks, f.fname))
 
         log.info("")
         log.info("   Flash usage")
@@ -568,23 +611,37 @@ class CC3200Connection(object):
     SFFS_FAT_METADATA2_CC32XX_OFFSET = 0x2000
     SFFS_FAT_METADATA2_LENGTH = 0x1000
     SFFS_FAT_PART_OFFSET = 0x1000
+    SFFS_FAT_FILE_HEADER_SIZE = 0x8
 
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
 
-    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None):
+    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None, output_file=None):
         self.port = port
         if not self.port is None:
             port.timeout = self.TIMEOUT
         self._device = device
-        self._image_file = open(image_file, 'rb')
         self._reset = reset
         self._sop2 = sop2
         self._erase_timeout = erase_timeout
-
+        self._image_file = None
+        self._output_file = None
+        
         self.vinfo = None
         self.vinfo_apps = None
+        
+        if not image_file is None:
+            self._image_file = open(image_file, 'rb')
+        if not output_file is None:
+            self._output_file = open(output_file, 'w+b')
 
+    def copy_input_file_to_output_file(self):
+        if not self._image_file is None or not self._output_file is None:
+            self._image_file.seek(0)
+            data = self._image_file.read()
+            self._output_file.seek(0)
+            self._output_file.write(data)
+    
     @contextmanager
     def _serial_timeout(self, timeout=None):
         if timeout is None:
@@ -745,9 +802,12 @@ class CC3200Connection(object):
         self._send_packet(command, timeout=self._erase_timeout)
 
     def _send_chunk(self, offset, data, storage_id=STORAGE_ID_SRAM):
-        command = OPCODE_RAW_STORAGE_WRITE + \
-            struct.pack(">III", storage_id, offset, len(data))
-        self._send_packet(command + data)
+        if not self.port is None:
+            command = OPCODE_RAW_STORAGE_WRITE + \
+                struct.pack(">III", storage_id, offset, len(data))
+            self._send_packet(command + data)
+        self._output_file.seek(offset)
+        self._output_file.write(data)
 
     def _raw_write(self, offset, data, storage_id=STORAGE_ID_SRAM):
         slist = self._get_storage_list()
@@ -769,7 +829,6 @@ class CC3200Connection(object):
             return self._raw_write(offset, data, storage_id)
 
     def _read_chunk(self, offset, size, storage_id=STORAGE_ID_SRAM):
-        
         if not self.port is None:
             # log.info("Reading chunk at 0x%x size 0x%x..." % (offset, size))
             command = OPCODE_RAW_STORAGE_READ + \
@@ -824,8 +883,8 @@ class CC3200Connection(object):
     def _exec_from_ram(self):
         self._send_packet(OPCODE_EXEC_FROM_RAM)
 
-    def _get_file_info(self, filename):
-        if not self.port is None:
+    def _get_file_info(self, filename, file_id=-1):
+        if not self.port is None and file_id == -1:
             command = OPCODE_GET_FILE_INFO \
                 + struct.pack(">I", len(filename)) \
                 + filename.encode()
@@ -838,7 +897,11 @@ class CC3200Connection(object):
         fat_info = self.get_fat_info(inactive=False)
         finfo = CC3x00FileInfo(exists=False, size=0)
         for file in fat_info.files:
-            if file.fname == filename:
+            if file_id == -1:
+                if file.fname == filename:
+                    finfo = CC3x00FileInfo(exists=True, size=file.size_blocks*SLFS_BLOCK_SIZE)
+                    break
+            elif file.index == file_id:
                 finfo = CC3x00FileInfo(exists=True, size=file.size_blocks*SLFS_BLOCK_SIZE)
                 break
         return finfo
@@ -973,10 +1036,10 @@ class CC3200Connection(object):
         if not s.is_ok:
             raise CC3200Error(f"Erasing file failed: 0x{s.value:02x}")
 
-    def write_file(self, local_file, cc_filename, sign_file=None, size=0, commit_flag=False):
+    def write_file(self, local_file, cc_filename, file_id=-1, sign_file=None, size=0, commit_flag=False, use_api=True):
         # size must be known in advance, so read the whole thing
-        data = local_file.read()
-        file_len = len(data)
+        file_data = local_file.read()
+        file_len = len(file_data)
 
         if not file_len:
             log.warn("Won't upload empty file")
@@ -994,7 +1057,54 @@ class CC3200Connection(object):
                     SLFS_FILE_OPEN_FLAG_COMMIT |
                     SLFS_FILE_OPEN_FLAG_SECURE |
                     SLFS_FILE_PUBLIC_WRITE)
-
+            
+        if use_api == False:
+            return self._write_file_raw(local_file, cc_filename, file_id, sign_data, fs_flags, size, file_data, file_len)
+        else:
+            return self._write_file_api(local_file, cc_filename, sign_data, fs_flags, size, file_data, file_len)
+            
+    def _write_file_raw(self, local_file, cc_filename, file_id, sign_data, fs_flags, size, file_data, file_len):
+        fat_info = self.get_fat_info(inactive=False, extended=True)
+        filefinfo = None
+        for file in fat_info.files:
+            if file_id == -1:
+                if file.fname == cc_filename:
+                    filefinfo = file
+                    break
+            elif file.index == file_id:
+                filefinfo = file
+                break
+        
+        if filefinfo == None:
+            log.info("File not found, only overwriting is supported.")
+            raise CC3200Error(f"{cc_filename} or id {file_id} not found, but only overwriting is supported.")
+        
+        #TODO: commit_flag --> Mirror
+        alloc_size_effective = alloc_size = max(size, file_len) + self.SFFS_FAT_FILE_HEADER_SIZE
+        blocks = int(alloc_size/fat_info.block_size+1) 
+        if (fs_flags and fs_flags & SLFS_FILE_OPEN_FLAG_COMMIT):
+            alloc_size_effective *= 2
+        
+        if blocks > filefinfo.size_blocks:
+            max_size = filefinfo.size_blocks*fat_info.block_size+self.SFFS_FAT_FILE_HEADER_SIZE
+            raise CC3200Error(f"{local_file.name} is too big. It should not be bigger that {max_size}bytes")
+                    
+        log.info("Uploading file %s -> %s (%i) [%d, disk=%d]...",
+                 local_file.name, cc_filename, filefinfo.index, alloc_size, alloc_size_effective)
+        
+        if filefinfo.header == None or len(filefinfo.header) != self.SFFS_FAT_FILE_HEADER_SIZE:
+            raise CC3200Error(f"File header in flash is missing or has the wrong size")
+        
+        fatfs_offset = filefinfo.start_block*fat_info.block_size
+        header = list(filefinfo.header)
+        header[2] = (filefinfo.size>>16) & 0xFF
+        header[1] = (filefinfo.size>>8) & 0xFF
+        header[0] = (filefinfo.size>>0) & 0xFF
+        header_new = bytearray(header)
+        self._raw_write(fatfs_offset, header_new, storage_id=STORAGE_ID_SFLASH)
+        self._raw_write(self.SFFS_FAT_FILE_HEADER_SIZE+fatfs_offset, file_data, storage_id=STORAGE_ID_SFLASH)
+                
+    def _write_file_api(self, local_file, cc_filename, sign_data, fs_flags, size, file_data, file_len):
         finfo = self._get_file_info(cc_filename)
         if finfo.exists:
             log.info("File exists on target, erasing")
@@ -1017,7 +1127,7 @@ class CC3200Connection(object):
 
         pos = 0
         while pos < file_len:
-            chunk = data[pos:pos+SLFS_BLOCK_SIZE]
+            chunk = file_data[pos:pos+SLFS_BLOCK_SIZE]
             command = OPCODE_FILE_CHUNK + struct.pack(">I", pos)
             command += chunk
             self._send_packet(command)
@@ -1032,14 +1142,14 @@ class CC3200Connection(object):
         log.debug("Closing file ...")
         return self._close_file(sign_data)
 
-    def read_file(self, cc_fname, local_file):
-        finfo = self._get_file_info(cc_fname)
+    def read_file(self, cc_fname, local_file, file_id=-1):
+        finfo = self._get_file_info(cc_fname, file_id)
         if not finfo.exists:
             raise CC3200Error(f"{cc_fname} does not exist on target")
 
         log.info("Reading file %s -> %s", cc_fname, local_file.name)
 
-        if not self.port is None:
+        if not self.port is None and file_id == -1:
             self._open_file_for_read(cc_fname)
 
             pos = 0
@@ -1057,21 +1167,21 @@ class CC3200Connection(object):
             self._close_file()
             return
         
-        fat_info = self.get_fat_info(inactive=False)
+        fat_info = self.get_fat_info(inactive=False, extended=True)
         filefinfo = None
         for file in fat_info.files:
-            if file.fname == cc_fname:
+            if file_id == -1:
+                if file.fname == cc_fname:
+                    filefinfo = file
+                    break
+            elif file.index == file_id:
                 filefinfo = file
                 break
             
-        header_size = 8
         sinfo = self._get_storage_info(storage_id=STORAGE_ID_SFLASH)
-        fatfs_offset = filefinfo.start_block*fat_info.block_size
-        fileheader = self._raw_read(fatfs_offset, header_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
-        file_size = fileheader[2]<<16 | fileheader[1]<<8 | fileheader[0]<<0 
-        
-        data = self._raw_read(header_size+fatfs_offset, file_size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
-        local_file.write(data)                
+        fatfs_offset = filefinfo.start_block*fat_info.block_size        
+        data = self._raw_read(self.SFFS_FAT_FILE_HEADER_SIZE+fatfs_offset, filefinfo.size, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+        local_file.write(data) 
 
     def write_flash(self, image, erase=True):
         data = image.read()
@@ -1087,7 +1197,7 @@ class CC3200Connection(object):
         data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH)
         image_file.write(data)
 
-    def get_fat_info(self, inactive=False):
+    def get_fat_info(self, inactive=False, extended=False):
         metadata2_offset = self.SFFS_FAT_METADATA2_CC3200_OFFSET
         if self._device == "cc32xx":
             metadata2_offset = self.SFFS_FAT_METADATA2_CC32XX_OFFSET
@@ -1144,19 +1254,32 @@ class CC3200Connection(object):
         else:
             fat_hdr = fat_hdrs[0]
         log.info("selected FAT revision: %d (%s)", fat_hdr.fat_commit_revision, inactive and 'inactive' or 'active')
-        return CC3x00SffsInfo(fat_hdr, sinfo, meta2, self._device)
+        
+        
+        fat_info = CC3x00SffsInfo(fat_hdr, sinfo, meta2, self._device)
+        
+        if extended:
+            for file in fat_info.files:
+                fatfs_offset = file.start_block*sinfo.block_size
+                fileheader = self._raw_read(fatfs_offset, self.SFFS_FAT_FILE_HEADER_SIZE, storage_id=STORAGE_ID_SFLASH, sinfo=sinfo)
+                file.read_header(fileheader)
+        
+        return fat_info
 
-    def list_filesystem(self, json_output=False, inactive=False):
-        fat_info = self.get_fat_info(inactive=inactive)
-        fat_info.print_sffs_info()
+    def list_filesystem(self, json_output=False, inactive=False, extended=False):
+        fat_info = self.get_fat_info(inactive=inactive, extended=extended)
+        fat_info.print_sffs_info(extended)
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, local_dir):
+    def read_all_files(self, local_dir, by_file_id=False):
         fat_info = self.get_fat_info(inactive=False)
         fat_info.print_sffs_info()
         for f in fat_info.files:
             ccname = f.fname
+            if by_file_id and f.fname == '':
+                ccname = str(f.index)
+                                
             if ccname.startswith('/'):
                 ccname = ccname[1:]
             target_file = os.path.join(local_dir, ccname) 
@@ -1164,11 +1287,14 @@ class CC3200Connection(object):
                 os.makedirs(name=os.path.dirname(target_file))
 
             try:
-                self.read_file(f.fname, open(target_file, 'wb', -1))
-            except:
-                log.error("File %s could not be read" % (f.fname))
+                if by_file_id and f.fname == '':
+                    self.read_file(ccname, open(target_file, 'wb', -1), f.index)
+                else:
+                    self.read_file(f.fname, open(target_file, 'wb', -1))
+            except Exception as ex:
+                log.error("File %s could not be read, %s" % (f.fname, str (ex)))
 
-    def write_all_files(self, local_dir, write=True):
+    def write_all_files(self, local_dir, write=True, use_api=True):
         for root, dirs, files in os.walk(local_dir):
             for file in files:
                 filepath = os.path.join(root, file)
@@ -1177,7 +1303,7 @@ class CC3200Connection(object):
                     ccpath = "/" + ccpath
 
                 if write:
-                    self.write_file(open(filepath, 'rb', -1), ccpath)
+                    self.write_file(local_file=open(filepath, 'rb', -1), cc_filename=ccpath, use_api=use_api)
                 else:
                     log.info("Simulation: Would copy local file %s to cc3200 %s" % (filepath, ccpath))
 
@@ -1225,8 +1351,8 @@ def main():
 
     port_name = args.port
 
-    if not args.image_file == "none":
-        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, device=args.device, image_file=args.image_file)
+    if not args.image_file is None:
+        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, device=args.device, image_file=args.image_file, output_file=args.output_file)
     
     else:
         try:
@@ -1261,13 +1387,18 @@ def main():
             cc.format_slfs(command.size)
 
         if command.cmd == 'write_file':
-            cc.write_file(command.local_file, command.cc_filename,
+            use_api = True
+            if not command.image_file is None and not command.output_file is None:
+                use_api = False
+                cc.copy_input_file_to_output_file()
+                
+            cc.write_file(command.local_file, command.cc_filename, command.file_id,
                           command.signature, command.file_size,
-                          command.commit_flag)
+                          command.commit_flag, use_api)
             check_fat = True
 
         if command.cmd == "read_file":
-            cc.read_file(command.cc_filename, command.local_file)
+            cc.read_file(command.cc_filename, command.local_file, command.file_id)
 
         if command.cmd == "erase_file":
             log.info("Erasing file %s", command.filename)
@@ -1280,18 +1411,22 @@ def main():
             cc.read_flash(command.dump_file, command.offset, command.size)
 
         if command.cmd == "list_filesystem":
-            cc.list_filesystem(command.json_output, command.inactive)
+            cc.list_filesystem(command.json_output, command.inactive, command.extended)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.local_dir)
+            cc.read_all_files(command.local_dir, command.by_file_id)
 
         if command.cmd == "write_all_files":
-            cc.write_all_files(command.local_dir, command.simulate)
+            use_api = True
+            if not command.image_file is None and not command.output_file is None:
+                use_api = False
+                cc.copy_input_file_to_output_file()
+            cc.write_all_files(command.local_dir, command.simulate, use_api)
             check_fat = True
 
 
     if check_fat:
-        fat_info = cc.get_fat_info(device=command.device)  # check FAT after each write_file operation
+        fat_info = cc.get_fat_info()  # check FAT after each write_file operation
         fat_info.print_sffs_info_short()
 
     if args.reboot_to_app:
