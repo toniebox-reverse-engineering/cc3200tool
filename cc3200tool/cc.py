@@ -1098,9 +1098,10 @@ class CC3200Connection(object):
         
         fatfs_offset = filefinfo.start_block*fat_info.block_size
         header = list(filefinfo.header)
-        header[2] = (filefinfo.size>>16) & 0xFF
-        header[1] = (filefinfo.size>>8) & 0xFF
-        header[0] = (filefinfo.size>>0) & 0xFF
+        #TODO: Use old filesize, so space stays reserved
+        header[2] = (file_len>>16) & 0xFF
+        header[1] = (file_len>>8) & 0xFF
+        header[0] = (file_len>>0) & 0xFF
         header_new = bytearray(header)
         self._raw_write(fatfs_offset, header_new, storage_id=STORAGE_ID_SFLASH)
         self._raw_write(self.SFFS_FAT_FILE_HEADER_SIZE+fatfs_offset, file_data, storage_id=STORAGE_ID_SFLASH)
