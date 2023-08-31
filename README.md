@@ -1,4 +1,4 @@
-# CC3200 Tool v1.1.0
+# CC3200 Tool v1.2.0
 
 A small tool to read and write files in TI's CC3200 SimpleLink (TM) filesystem.
 Partial support for the CC32XX (CC3230/CC3235) series (via flash image)
@@ -43,6 +43,7 @@ or clone this repǫ
 
     git clone http://github.com/toniebox-reverse-engineering/cc3200tool.git
     cd cc3200tool
+    pip3 install .
 
 then it's just like any other python package:
 
@@ -106,3 +107,7 @@ of arguments. Some examples:
 
     # Reads all files to a directory and creates subdirecty structure from a flashdump
     cc3200tool -if cc3200-flash.bin read_all_files extract/
+
+    # Replace the existing ca.der on the flash (only works if the new file isn't bigger than the old one, experimental!)
+    cc3200tool -if cc32xx-flash.bin -of cc32xx-flash.custom.bin -d cc32xx write_file customca.der /cert/ca.der
+
