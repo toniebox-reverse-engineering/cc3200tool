@@ -528,8 +528,15 @@ class CC3x00SffsInfo(object):
             fo_abs = file_name_array_offset + fname_offset
             fname = meta2[fo_abs:fo_abs + fname_len]
 
+            try:
+                filename_decoded = fname.decode('ascii')
+            except UnicodeDecodeError:
+                filename_decoded = fname.decode('ascii', 'replace')
+                log.warning("broken FAT fileinfo: invalid filename: %s", filename_decoded)
+                filename_decoded = "<invalid>"
+
             entry = CC3x00SffsStatsFileEntry(i, start_block, size_blocks,
-                                             mirrored, flags, fname.decode('ascii'))
+                                             mirrored, flags, filename_decoded)
             self.files.append(entry)
 
             occupied_block_snippets.append((start_block, entry.total_blocks))
