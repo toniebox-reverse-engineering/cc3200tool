@@ -287,6 +287,9 @@ parser_read_all_files.add_argument(
 parser_read_all_files.add_argument(
         "--by-file-id", action="store_true",
         help="Read unknown filenames by its id")
+parser_read_all_files.add_argument(
+        "--all-by-file-id", action="store_true",
+        help="Read all filenames by its id")
 
 parser_write_all_files = subparsers.add_parser(
         "write_all_files",
@@ -1281,7 +1284,7 @@ class CC3200Connection(object):
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, local_dir, by_file_id=False):
+    def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False):
         fat_info = self.get_fat_info(inactive=False)
         fat_info.print_sffs_info()
         for f in fat_info.files:
@@ -1291,12 +1294,16 @@ class CC3200Connection(object):
                                 
             if ccname.startswith('/'):
                 ccname = ccname[1:]
+
             target_file = os.path.join(local_dir, ccname) 
+            if all_by_file_id:
+                target_file = os.path.join(local_dir, str(f.index)) 
+
             if not os.path.exists(os.path.dirname(target_file)):
                 os.makedirs(name=os.path.dirname(target_file))
 
             try:
-                if by_file_id and f.fname == '':
+                if all_by_file_id or ( by_file_id and f.fname == '' ):
                     self.read_file(ccname, open(target_file, 'wb', -1), f.index)
                 else:
                     self.read_file(f.fname, open(target_file, 'wb', -1))
@@ -1423,7 +1430,7 @@ def main():
             cc.list_filesystem(command.json_output, command.inactive, command.extended)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.local_dir, command.by_file_id)
+            cc.read_all_files(command.local_dir, command.by_file_id, command.all_by_file_id)
 
         if command.cmd == "write_all_files":
             use_api = True
