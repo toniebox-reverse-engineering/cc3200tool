@@ -246,7 +246,7 @@ parser_read_file.add_argument(
 parser_write_flash = subparsers.add_parser(
         "write_flash", help="Write a Gang image on the flash")
 parser_write_flash.add_argument(
-        "image_file", type=argparse.FileType('rb'),
+        "gang_image_file", type=argparse.FileType('rb'),
         help="gang image file prepared with Uniflash")
 parser_write_flash.add_argument(
         "--no-erase", type=bool, default=False,
@@ -1414,7 +1414,7 @@ def main():
             cc.erase_file(command.filename)
 
         if command.cmd == "write_flash":
-            cc.write_flash(command.image_file, not command.no_erase)
+            cc.write_flash(command.gang_image_file, not command.no_erase)
 
         if command.cmd == "read_flash":
             cc.read_flash(command.dump_file, command.offset, command.size)
