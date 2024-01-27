@@ -242,6 +242,9 @@ parser_read_file.add_argument(
         help="local path to store the file contents in")
 parser_read_file.add_argument(
         "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id")
+parser_read_file.add_argument(
+        "--inactive", action="store_true",
+        help="read from inactive FAT copy")
 
 parser_write_flash = subparsers.add_parser(
         "write_flash", help="Write a Gang image on the flash")
@@ -290,6 +293,9 @@ parser_read_all_files.add_argument(
 parser_read_all_files.add_argument(
         "--all-by-file-id", action="store_true",
         help="Read all filenames by its id")
+parser_read_all_files.add_argument(
+        "--inactive", action="store_true",
+        help="read from inactive FAT copy")
 
 parser_write_all_files = subparsers.add_parser(
         "write_all_files",
@@ -894,7 +900,7 @@ class CC3200Connection(object):
     def _exec_from_ram(self):
         self._send_packet(OPCODE_EXEC_FROM_RAM)
 
-    def _get_file_info(self, filename, file_id=-1):
+    def _get_file_info(self, filename, file_id=-1, inactive=False):
         if not self.port is None and file_id == -1:
             command = OPCODE_GET_FILE_INFO \
                 + struct.pack(">I", len(filename)) \
@@ -905,7 +911,7 @@ class CC3200Connection(object):
                 raise CC3200Error()
             return CC3x00FileInfo.from_packet(finfo)
         
-        fat_info = self.get_fat_info(inactive=False)
+        fat_info = self.get_fat_info(inactive=inactive)
         finfo = CC3x00FileInfo(exists=False, size=0)
         for file in fat_info.files:
             if file_id == -1:
@@ -1154,8 +1160,8 @@ class CC3200Connection(object):
         log.debug("Closing file ...")
         return self._close_file(sign_data)
 
-    def read_file(self, cc_fname, local_file, file_id=-1):
-        finfo = self._get_file_info(cc_fname, file_id)
+    def read_file(self, cc_fname, local_file, file_id=-1, inactive=False):
+        finfo = self._get_file_info(cc_fname, file_id, inactive)
         if not finfo.exists:
             raise CC3200Error(f"{cc_fname} does not exist on target")
 
@@ -1179,7 +1185,7 @@ class CC3200Connection(object):
             self._close_file()
             return
         
-        fat_info = self.get_fat_info(inactive=False, extended=True)
+        fat_info = self.get_fat_info(inactive=inactive, extended=True)
         filefinfo = None
         for file in fat_info.files:
             if file_id == -1:
@@ -1284,8 +1290,8 @@ class CC3200Connection(object):
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False):
-        fat_info = self.get_fat_info(inactive=False)
+    def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False, inactive=False):
+        fat_info = self.get_fat_info(inactive=inactive)
         fat_info.print_sffs_info()
         for f in fat_info.files:
             ccname = f.fname
@@ -1304,9 +1310,9 @@ class CC3200Connection(object):
 
             try:
                 if all_by_file_id or ( by_file_id and f.fname == '' ):
-                    self.read_file(ccname, open(target_file, 'wb', -1), f.index)
+                    self.read_file(ccname, open(target_file, 'wb', -1), f.index, inactive=inactive)
                 else:
-                    self.read_file(f.fname, open(target_file, 'wb', -1))
+                    self.read_file(f.fname, open(target_file, 'wb', -1), inactive=inactive)
             except Exception as ex:
                 log.error("File %s could not be read, %s" % (f.fname, str (ex)))
 
@@ -1414,7 +1420,7 @@ def main():
             check_fat = True
 
         if command.cmd == "read_file":
-            cc.read_file(command.cc_filename, command.local_file, command.file_id)
+            cc.read_file(command.cc_filename, command.local_file, command.file_id, command.inactive)
 
         if command.cmd == "erase_file":
             log.info("Erasing file %s", command.filename)
@@ -1430,7 +1436,7 @@ def main():
             cc.list_filesystem(command.json_output, command.inactive, command.extended)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.local_dir, command.by_file_id, command.all_by_file_id)
+            cc.read_all_files(command.local_dir, command.by_file_id, command.all_by_file_id, command.inactive)
 
         if command.cmd == "write_all_files":
             use_api = True

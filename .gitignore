@@ -14,3 +14,4 @@ cc3200tool/logging
 cc3200tool/json
 test/
 .vscode/
+tmp/*
