@@ -266,6 +266,9 @@ parser_read_flash.add_argument(
 parser_read_flash.add_argument(
         "--size", type=auto_int, default=-1,
         help="dump size (default is complete SFFS)")
+parser_read_flash.add_argument(
+        "--ignore-max-size", type=bool, default=False,
+        help="ignore the maximum size of the flash")
 
 
 parser_list_filesystem = subparsers.add_parser(
@@ -860,7 +863,7 @@ class CC3200Connection(object):
         data = self._image_file.read(size)
         return data
 
-    def _raw_read(self, offset, size, storage_id=STORAGE_ID_SRAM, sinfo=None):
+    def _raw_read(self, offset, size, storage_id=STORAGE_ID_SRAM, sinfo=None, ignore_max_size=False):
         slist = self._get_storage_list()
         if storage_id == STORAGE_ID_SFLASH and not slist.sflash:
             raise CC3200Error("no serial flash?!")
@@ -871,9 +874,13 @@ class CC3200Connection(object):
             sinfo = self._get_storage_info(storage_id)
         storage_size = sinfo.block_count * sinfo.block_size
 
+        if ignore_max_size:
+            storage_size = offset + size
+            log.warning("Ignoring storage size limits")
+
         if offset > storage_size:
             raise CC3200Error("offset %d is bigger than available mem %d" %
-                              (offset, storage_size))
+                                (offset, storage_size))
 
         if size < 1:
             size = storage_size - offset
@@ -1211,8 +1218,8 @@ class CC3200Connection(object):
         self._raw_write(8, data[8:], storage_id=STORAGE_ID_SFLASH)
         self._raw_write(0, data[:8], storage_id=STORAGE_ID_SFLASH)
 
-    def read_flash(self, image_file, offset, size):
-        data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH)
+    def read_flash(self, image_file, offset, size, ignore_max_size=False):
+        data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH, ignore_max_size=ignore_max_size)
         image_file.write(data)
 
     def get_fat_info(self, inactive=False, extended=False):
@@ -1430,7 +1437,7 @@ def main():
             cc.write_flash(command.gang_image_file, not command.no_erase)
 
         if command.cmd == "read_flash":
-            cc.read_flash(command.dump_file, command.offset, command.size)
+            cc.read_flash(command.dump_file, command.offset, command.size, command.ignore_max_size)
 
         if command.cmd == "list_filesystem":
             cc.list_filesystem(command.json_output, command.inactive, command.extended)
