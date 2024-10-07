@@ -1328,6 +1328,7 @@ class CC3200Connection(object):
             for file in files:
                 filepath = os.path.join(root, file)
                 ccpath = filepath[len(local_dir):]
+                ccpath = ccpath.replace("\\", "/")
                 if not ccpath.startswith("/"):
                     ccpath = "/" + ccpath
 
