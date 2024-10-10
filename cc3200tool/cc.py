@@ -19,6 +19,7 @@
 
 import sys
 import os
+import tempfile
 import time
 import argparse
 import struct
@@ -232,6 +233,9 @@ parser_write_file.add_argument(
         help="enables fail safe MIRROR feature")
 parser_write_file.add_argument(
         "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id (image_file only!)")
+parser_write_file.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a read of the written data to verify")
 
 parser_read_file = subparsers.add_parser(
         "read_file", help="read a file from the SL filesystem")
@@ -245,6 +249,10 @@ parser_read_file.add_argument(
 parser_read_file.add_argument(
         "--inactive", action="store_true",
         help="read from inactive FAT copy")
+parser_read_file.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a second read of the data to verify")
+
 
 parser_write_flash = subparsers.add_parser(
         "write_flash", help="Write a Gang image on the flash")
@@ -254,6 +262,9 @@ parser_write_flash.add_argument(
 parser_write_flash.add_argument(
         "--no-erase", type=bool, default=False,
         help="do not perform an erase before write (for blank chips)")
+parser_write_flash.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a read of the written data to verify")
 
 parser_read_flash = subparsers.add_parser(
         "read_flash", help="Read SFFS contents into the file")
@@ -269,6 +280,9 @@ parser_read_flash.add_argument(
 parser_read_flash.add_argument(
         "--ignore-max-size", type=bool, default=False,
         help="ignore the maximum size of the flash")
+parser_read_flash.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a second read of the data to verify")
 
 
 parser_list_filesystem = subparsers.add_parser(
@@ -299,6 +313,9 @@ parser_read_all_files.add_argument(
 parser_read_all_files.add_argument(
         "--inactive", action="store_true",
         help="read from inactive FAT copy")
+parser_read_all_files.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a second read of the data to verify")
 
 parser_write_all_files = subparsers.add_parser(
         "write_all_files",
@@ -309,6 +326,9 @@ parser_write_all_files.add_argument(
 parser_write_all_files.add_argument(
         "--simulate", action="store_false",
         help="List all files to be written and skip writing them")
+parser_write_all_files.add_argument(
+        "--no-verify", type=bool, default=False,
+        help="do not perform a read of the written data to verify")
 
 def dll_data(fname):
     return get_data('cc3200tool', os.path.join('dll', fname))
@@ -1297,9 +1317,10 @@ class CC3200Connection(object):
         if json_output:
             fat_info.print_sffs_info_json()
     
-    def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False, inactive=False):
+    def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False, inactive=False, no_verify=False):
         fat_info = self.get_fat_info(inactive=inactive)
         fat_info.print_sffs_info()
+        has_error = False
         for f in fat_info.files:
             ccname = f.fname
             if by_file_id and f.fname == '':
@@ -1316,14 +1337,33 @@ class CC3200Connection(object):
                 os.makedirs(name=os.path.dirname(target_file))
 
             try:
+                tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                 if all_by_file_id or ( by_file_id and f.fname == '' ):
                     self.read_file(ccname, open(target_file, 'wb', -1), f.index, inactive=inactive)
+                    if not no_verify:
+                        self.read_file(ccname, tmpFile, f.index, inactive=inactive)
                 else:
                     self.read_file(f.fname, open(target_file, 'wb', -1), inactive=inactive)
+                    if not no_verify:
+                        self.read_file(f.fname, tmpFile, inactive=inactive)
+
+                if not no_verify:
+                    tmpFile.seek(0)
+                    if tmpFile.read() == open(target_file, 'rb').read():
+                        log.info("File %s verified" % target_file)
+                    else:
+                        log.error("File %s could not be verified" % target_file)
+                        has_error = True
             except Exception as ex:
                 log.error("File %s could not be read, %s" % (f.fname, str (ex)))
+                has_error = True
 
-    def write_all_files(self, local_dir, write=True, use_api=True):
+        if has_error:
+            log.error("One or more files could not be verified or read at all")
+            sys.exit(-4)
+
+    def write_all_files(self, local_dir, write=True, use_api=True, no_verify=False):
+        has_error = False
         for root, dirs, files in os.walk(local_dir):
             for file in files:
                 filepath = os.path.join(root, file)
@@ -1334,8 +1374,20 @@ class CC3200Connection(object):
 
                 if write:
                     self.write_file(local_file=open(filepath, 'rb', -1), cc_filename=ccpath, use_api=use_api)
+                    if not no_verify:
+                        tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
+                        self.read_file(ccpath, tmpFile)
+                        tmpFile.seek(0)
+                        if tmpFile.read() == open(filepath, 'rb').read():
+                            log.info("File %s verified" % ccpath)
+                        else:
+                            log.error("File %s could not be verified" % ccpath)
+                            has_error = True
                 else:
                     log.info("Simulation: Would copy local file %s to cc3200 %s" % (filepath, ccpath))
+        if has_error:
+            log.error("One or more files could not be verified")
+            sys.exit(-4)
 
 
 def split_argv(cmdline_args):
@@ -1425,10 +1477,32 @@ def main():
             cc.write_file(command.local_file, command.cc_filename, command.file_id,
                           command.signature, command.file_size,
                           command.commit_flag, use_api)
+
+            if not command.no_verify:
+                tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
+                cc.read_file(command.cc_filename, tmpFile)
+                tmpFile.seek(0)
+                command.local_file.seek(0)
+                if tmpFile.read() == command.local_file.read():
+                    log.info("File %s verified" % command.cc_filename)
+                else:
+                    log.error("File %s could not be verified" % command.cc_filename)
+                    sys.exit(-4)
+            
             check_fat = True
 
         if command.cmd == "read_file":
             cc.read_file(command.cc_filename, command.local_file, command.file_id, command.inactive)
+            if not command.no_verify:
+                tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
+                cc.read_file(command.cc_filename, tmpFile, command.file_id, command.inactive)
+                tmpFile.seek(0)
+                command.local_file.seek(0)
+                if tmpFile.read() == command.local_file.read():
+                    log.info("File %s verified" % command.cc_filename)
+                else:
+                    log.error("File %s could not be verified" % command.cc_filename)
+                    sys.exit(-4)
 
         if command.cmd == "erase_file":
             log.info("Erasing file %s", command.filename)
@@ -1436,22 +1510,43 @@ def main():
 
         if command.cmd == "write_flash":
             cc.write_flash(command.gang_image_file, not command.no_erase)
+            if not command.no_verify:
+                tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
+                cc.read_flash(tmpFile)
+                tmpFile.seek(0)
+                command.gang_image_file.seek(0)
+                if tmpFile.read() == command.gang_image_file.read():
+                    log.info("Flash verified")
+                else:
+                    log.error("Flash could not be verified")
+                    sys.exit(-4)
+
 
         if command.cmd == "read_flash":
             cc.read_flash(command.dump_file, command.offset, command.size, command.ignore_max_size)
+            if not command.no_verify:
+                tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
+                cc.read_flash(tmpFile, command.offset, command.size, command.ignore_max_size)
+                tmpFile.seek(0)
+                command.dump_file.seek(0)
+                if tmpFile.read() == command.dump_file.read():
+                    log.info("Flash verified")
+                else:
+                    log.error("Flash could not be verified")
+                    sys.exit(-4)
 
         if command.cmd == "list_filesystem":
             cc.list_filesystem(command.json_output, command.inactive, command.extended)
 
         if command.cmd == "read_all_files":
-            cc.read_all_files(command.local_dir, command.by_file_id, command.all_by_file_id, command.inactive)
+            cc.read_all_files(command.local_dir, command.by_file_id, command.all_by_file_id, command.inactive, command.no_verify)
 
         if command.cmd == "write_all_files":
             use_api = True
             if not command.image_file is None and not command.output_file is None:
                 use_api = False
                 cc.copy_input_file_to_output_file()
-            cc.write_all_files(command.local_dir, command.simulate, use_api)
+            cc.write_all_files(command.local_dir, command.simulate, use_api, command.no_verify)
             check_fat = True
 
 
