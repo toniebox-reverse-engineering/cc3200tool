@@ -1321,6 +1321,13 @@ class CC3200Connection(object):
         fat_info = self.get_fat_info(inactive=inactive)
         fat_info.print_sffs_info()
         has_error = False
+
+        if not os.path.exists(local_dir):
+            os.makedirs(local_dir)
+            if not os.path.exists(local_dir):
+                raise CC3200Error("could not create local directory %s" % local_dir)
+            log.info("Created local directory %s" % local_dir)
+
         for f in fat_info.files:
             ccname = f.fname
             if by_file_id and f.fname == '':
