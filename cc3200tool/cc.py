@@ -242,7 +242,7 @@ parser_read_file = subparsers.add_parser(
 parser_read_file.add_argument(
         "cc_filename", help="file to read from the target")
 parser_read_file.add_argument(
-        "local_file", type=argparse.FileType('wb'),
+        "local_file", type=argparse.FileType('w+b'),
         help="local path to store the file contents in")
 parser_read_file.add_argument(
         "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id")
@@ -302,7 +302,8 @@ parser_read_all_files = subparsers.add_parser(
         "read_all_files",
         help="Reads all files into a subfolder structure")
 parser_read_all_files.add_argument(
-        "local_dir", type=PathType(exists=True, type='dir'),
+        #"local_dir", type=PathType(exists=False, type='dir'),
+        "local_dir",
         help="local path to store the files in")
 parser_read_all_files.add_argument(
         "--by-file-id", action="store_true",
@@ -1330,8 +1331,13 @@ class CC3200Connection(object):
 
         for f in fat_info.files:
             ccname = f.fname
-            if by_file_id and f.fname == '':
-                ccname = str(f.index)
+            if f.fname == '':
+                if by_file_id:
+                    ccname = str(f.index)
+                else:
+                    log.error("Found file without filename, skipping index=%i", f.index)
+                    has_error = True
+                    continue
                                 
             if ccname.startswith('/'):
                 ccname = ccname[1:]
@@ -1346,11 +1352,11 @@ class CC3200Connection(object):
             try:
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                 if all_by_file_id or ( by_file_id and f.fname == '' ):
-                    self.read_file(ccname, open(target_file, 'wb', -1), f.index, inactive=inactive)
+                    self.read_file(ccname, open(target_file, 'w+b', -1), f.index, inactive=inactive)
                     if not no_verify:
                         self.read_file(ccname, tmpFile, f.index, inactive=inactive)
                 else:
-                    self.read_file(f.fname, open(target_file, 'wb', -1), inactive=inactive)
+                    self.read_file(f.fname, open(target_file, 'w+b', -1), inactive=inactive)
                     if not no_verify:
                         self.read_file(f.fname, tmpFile, inactive=inactive)
 
@@ -1382,6 +1388,7 @@ class CC3200Connection(object):
                 if write:
                     self.write_file(local_file=open(filepath, 'rb', -1), cc_filename=ccpath, use_api=use_api)
                     if not no_verify:
+                        log.info("Verify written file with second read...")
                         tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                         self.read_file(ccpath, tmpFile)
                         tmpFile.seek(0)
@@ -1486,6 +1493,7 @@ def main():
                           command.commit_flag, use_api)
 
             if not command.no_verify:
+                log.info("Read file after writing for verification...")
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                 cc.read_file(command.cc_filename, tmpFile)
                 tmpFile.seek(0)
@@ -1501,6 +1509,7 @@ def main():
         if command.cmd == "read_file":
             cc.read_file(command.cc_filename, command.local_file, command.file_id, command.inactive)
             if not command.no_verify:
+                log.info("Read file a second time for verification...")
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                 cc.read_file(command.cc_filename, tmpFile, command.file_id, command.inactive)
                 tmpFile.seek(0)
@@ -1509,6 +1518,9 @@ def main():
                     log.info("File %s verified" % command.cc_filename)
                 else:
                     log.error("File %s could not be verified" % command.cc_filename)
+                    local_file_name = command.local_file.name
+                    command.local_file.close()
+                    os.remove(local_file_name)
                     sys.exit(-4)
 
         if command.cmd == "erase_file":
@@ -1518,28 +1530,33 @@ def main():
         if command.cmd == "write_flash":
             cc.write_flash(command.gang_image_file, not command.no_erase)
             if not command.no_verify:
+                log.info("Verify flash write by reading...")
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
-                cc.read_flash(tmpFile)
+                cc.read_flash(tmpFile, 0, -1)
                 tmpFile.seek(0)
                 command.gang_image_file.seek(0)
                 if tmpFile.read() == command.gang_image_file.read():
                     log.info("Flash verified")
                 else:
-                    log.error("Flash could not be verified")
+                    log.error("Flash could not be verified, please flash again!")
                     sys.exit(-4)
 
 
         if command.cmd == "read_flash":
             cc.read_flash(command.dump_file, command.offset, command.size, command.ignore_max_size)
             if not command.no_verify:
+                log.info("Verify flash dump with second reading...")
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
                 cc.read_flash(tmpFile, command.offset, command.size, command.ignore_max_size)
                 tmpFile.seek(0)
                 command.dump_file.seek(0)
                 if tmpFile.read() == command.dump_file.read():
-                    log.info("Flash verified")
+                    log.info("Flash verified, reading equal!")
                 else:
-                    log.error("Flash could not be verified")
+                    log.error("Flash could not be verified, first and second dump are different!")
+                    dump_file_name = command.dump_file.name
+                    command.dump_file.close()
+                    os.remove(dump_file_name)
                     sys.exit(-4)
 
         if command.cmd == "list_filesystem":
