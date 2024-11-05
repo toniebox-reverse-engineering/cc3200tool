@@ -1588,7 +1588,7 @@ def main():
             check_fat = True
         
         if command.cmd == "dll_data_test":
-            dll_data('rbtl3100s.dllx')
+            dll_data('rbtl3100s.dll')
 
 
     if check_fat:
