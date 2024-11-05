@@ -336,6 +336,7 @@ parser_dll_data_test = subparsers.add_parser(
         help="Tests the dll_data function")
 
 def dll_data(fname):
+    data = None
     path = os.path.join(os.path.dirname(__file__), os.path.join('dll', fname))
     if os.path.exists(path):
         log.info("Reading %s from file %s" % (fname, path))
@@ -1587,7 +1588,7 @@ def main():
             check_fat = True
         
         if command.cmd == "dll_data_test":
-            dll_data('rbtl3100s.dll')
+            dll_data('rbtl3100s.dllx')
 
 
     if check_fat:
