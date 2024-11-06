@@ -331,8 +331,22 @@ parser_write_all_files.add_argument(
         "--no-verify", type=bool, default=False,
         help="do not perform a read of the written data to verify")
 
+parser_dll_data_test = subparsers.add_parser(
+        "dll_data_test",
+        help="Tests the dll_data function")
+
 def dll_data(fname):
-    return get_data('cc3200tool', os.path.join('dll', fname))
+    data = None
+    path = os.path.join(os.path.dirname(__file__), os.path.join('dll', fname))
+    if os.path.exists(path):
+        log.info("Reading %s from file %s" % (fname, path))
+        data = open(path, 'rb').read()
+    if data is None:
+        log.info("Reading %s from package" % fname)
+        data = get_data('cc3200tool', os.path.join('dll', fname))
+    if data is None:
+        raise CC3200Error("could not find dll file %s" % fname)
+    return data
 
 
 class CC3200Error(Exception):
@@ -1572,6 +1586,9 @@ def main():
                 cc.copy_input_file_to_output_file()
             cc.write_all_files(command.local_dir, command.simulate, use_api, command.no_verify)
             check_fat = True
+        
+        if command.cmd == "dll_data_test":
+            dll_data('rbtl3100s.dll')
 
 
     if check_fat:
