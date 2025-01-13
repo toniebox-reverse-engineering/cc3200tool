@@ -1205,6 +1205,7 @@ class CC3200Connection(object):
     def read_file(self, cc_fname, local_file, file_id=-1, inactive=False):
         finfo = self._get_file_info(cc_fname, file_id, inactive)
         if not finfo.exists:
+            os.remove(local_file.name)
             raise CC3200Error(f"{cc_fname} does not exist on target")
 
         log.info("Reading file %s -> %s", cc_fname, local_file.name)
