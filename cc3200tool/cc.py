@@ -877,6 +877,9 @@ class CC3200Connection(object):
             chunk = data[sent:sent + chunk_size]
             self._send_chunk(offset + sent, chunk, storage_id)
             sent += len(chunk)
+            sys.stderr.write('.')
+            sys.stderr.flush()
+        sys.stderr.write("\n")
 
     def _raw_write_file(self, offset, filename, storage_id=STORAGE_ID_SRAM):
         with open(filename, 'r') as f:
