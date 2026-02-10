@@ -526,7 +526,7 @@ class CC3x00SffsInfo(object):
         occupied_block_snippets = []
 
         self.used_blocks = 5  # FAT table size, as per documentation
-        occupied_block_snippets.append((0, 5))
+        occupied_block_snippets.append((0, 5, "FAT table"))
 
         self.files = []
         
@@ -587,11 +587,11 @@ class CC3x00SffsInfo(object):
                                              mirrored, flags, filename_decoded)
             self.files.append(entry)
 
-            occupied_block_snippets.append((start_block, entry.total_blocks))
+            occupied_block_snippets.append((start_block, entry.total_blocks, filename_decoded))
             self.used_blocks = self.used_blocks + entry.total_blocks
 
         # in order to track the trailing "hole", like uniflash does
-        occupied_block_snippets.append((self.block_count, 0))
+        occupied_block_snippets.append((self.block_count, 0, "BLOCK COUNT"))
 
         self.holes = []
         occupied_block_snippets.sort(key=lambda e: e[0])
@@ -601,8 +601,8 @@ class CC3x00SffsInfo(object):
                 for f in self.files:
                     log.info("[%d] block %d..%d fname=%s" %
                              (f.index, f.start_block, f.start_block + f.total_blocks, f.fname))
-                raise CC3200Error("broken FAT: overlapping entry at block %d (prev end was %d)" %
-                                  (snippet[0], prev_end_block))
+                raise CC3200Error("broken FAT: overlapping entry at block %d (prev end was %d) fname=%s" %
+                                  (snippet[0], prev_end_block, snippet[2]))
             if snippet[0] > prev_end_block:
                 hole = CC3x00SffsHole(prev_end_block, snippet[0] - prev_end_block - 1)
                 self.holes.append(hole)

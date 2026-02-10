@@ -55,6 +55,16 @@ then it's just like any other python package:
     # then get updates with
     git pull
 
+## Warning
+If you are writing a full image with write_flash and the size is not 1MB (4MB for ex.), the filesystem may fallback to 1MB (256 blocks).
+In this case you'll have to extract all files from your flash, format it, flash the service pack and rewrite all files.
+Useful commands: (THIS WIPES YOUR FLASH, DON'T DO THAT WITHOUT A BACKUP)
+
+    format_flash -s 4M
+    write_file --no-verify --signature ota_1.0.1.13-2.11.0.1.ucf.signed.bin ota_1.0.1.13-2.11.0.1.ucf /sys/servicepack.ucf 
+    write_all_files flash_files/
+
+
 ## Usage
 
 You need a serial port connected to the target's UART interface. For
