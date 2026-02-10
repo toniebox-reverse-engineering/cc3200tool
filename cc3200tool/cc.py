@@ -31,6 +31,7 @@ from collections import namedtuple
 import json
 
 import serial
+from .esp_gateway import EspSerial
 
 log = logging.getLogger()
 logging.basicConfig(stream=sys.stderr, level=logging.INFO,
@@ -202,6 +203,9 @@ parser.add_argument(
 parser.add_argument(
         "-d", "--device", type=str, default="cc3200",
         help="Device to select cc3200/cc32xx (to decide which offsets to use)")
+parser.add_argument(
+        "-g", "--gateway", action="store_true",
+        help="Use ESP32 Gateway (overalys Serial class)")
 
 subparsers = parser.add_subparsers(dest="cmd")
 
@@ -1468,6 +1472,12 @@ def main():
 
     sop2_method = args.sop2
     reset_method = args.reset
+
+    if args.gateway:
+        log.info("Gateway Mode: Forcing Reset=DTR, SOP2=None")
+        reset_method = Pincfg(False, 'dtr')
+        sop2_method = Pincfg(False, 'none')
+
     if sop2_method.pin == reset_method.pin and reset_method.pin != 'none':
         log.error("sop2 and reset methods cannot be the same output pin")
         sys.exit(-3)
@@ -1479,9 +1489,15 @@ def main():
     
     else:
         try:
-            p = serial.Serial(
-                port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE)
+            if args.gateway:
+                log.info("Using ESP32 Gateway mode")
+                p = EspSerial(
+                    port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE)
+            else:
+                p = serial.Serial(
+                    port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE)
         except (Exception, ) as e:
             log.warn("unable to open serial port %s: %s", port_name, e)
             sys.exit(-2)
