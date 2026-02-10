@@ -234,7 +234,7 @@ parser_write_file.add_argument(
 parser_write_file.add_argument(
         "--file-id", type=auto_int, default=-1, help="if filename not available you can read a file by its id (image_file only!)")
 parser_write_file.add_argument(
-        "--no-verify", type=bool, default=False,
+        "--no-verify", action="store_true",
         help="do not perform a read of the written data to verify")
 
 parser_read_file = subparsers.add_parser(
@@ -250,7 +250,7 @@ parser_read_file.add_argument(
         "--inactive", action="store_true",
         help="read from inactive FAT copy")
 parser_read_file.add_argument(
-        "--no-verify", type=bool, default=False,
+        "--no-verify", action="store_true",
         help="do not perform a second read of the data to verify")
 
 
@@ -260,10 +260,10 @@ parser_write_flash.add_argument(
         "gang_image_file", type=argparse.FileType('rb'),
         help="gang image file prepared with Uniflash")
 parser_write_flash.add_argument(
-        "--no-erase", type=bool, default=False,
+        "--no-erase", action="store_true",
         help="do not perform an erase before write (for blank chips)")
 parser_write_flash.add_argument(
-        "--no-verify", type=bool, default=False,
+        "--no-verify", action="store_true",
         help="do not perform a read of the written data to verify")
 
 parser_read_flash = subparsers.add_parser(
@@ -315,7 +315,7 @@ parser_read_all_files.add_argument(
         "--inactive", action="store_true",
         help="read from inactive FAT copy")
 parser_read_all_files.add_argument(
-        "--no-verify", type=bool, default=False,
+        "--no-verify", action="store_true",
         help="do not perform a second read of the data to verify")
 
 parser_write_all_files = subparsers.add_parser(
@@ -328,7 +328,7 @@ parser_write_all_files.add_argument(
         "--simulate", action="store_false",
         help="List all files to be written and skip writing them")
 parser_write_all_files.add_argument(
-        "--no-verify", type=bool, default=False,
+        "--no-verify", action="store_true",
         help="do not perform a read of the written data to verify")
 
 parser_dll_data_test = subparsers.add_parser(
