@@ -411,6 +411,7 @@ class CC3x00StorageInfo(object):
     @classmethod
     def from_packet(cls, data):
         bsize, bcount = struct.unpack(">HH", data[:4])
+        log.info("block_size=%d, block_count=%d", bsize, bcount)
         return cls(bsize, bcount)
 
     def __repr__(self):
@@ -825,7 +826,7 @@ class CC3200Connection(object):
         return CC3x00VersionInfo((0,4,1,2), (0,0,0,0), (0,0,0,0), (0,0,0,0), (16,0,0,0))
 
     def _get_storage_list(self):
-        log.info("Getting storage list...")
+        log.info("Getting storage list")
         if not self.port is None:
             self._send_packet(OPCODE_GET_STORAGE_LIST)
             with self._serial_timeout(.5):
@@ -1251,9 +1252,13 @@ class CC3200Connection(object):
         data = image.read()
         data_len = len(data)
         if erase:
+            log.info("Erasing flash (slow)...")
             count = int(math.ceil(data_len / float(SLFS_BLOCK_SIZE)))
             self._erase_blocks(0, count, storage_id=STORAGE_ID_SFLASH)
+            log.info("Erased %d blocks with block size %d bytes, total %d bytes", count, SLFS_BLOCK_SIZE, data_len)
 
+
+        log.info("Writing flash...")
         self._raw_write(8, data[8:], storage_id=STORAGE_ID_SFLASH)
         self._raw_write(0, data[:8], storage_id=STORAGE_ID_SFLASH)
         return data_len
