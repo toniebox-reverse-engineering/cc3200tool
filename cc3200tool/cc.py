@@ -1555,7 +1555,6 @@ def main():
             cc.erase_file(command.filename)
 
         if command.cmd == "write_flash":
-            log.info("Writing flash...")
             size = cc.write_flash(command.gang_image_file, not command.no_erase)
             log.info("Flash written, size=%d" % size)
             if not command.no_verify:
