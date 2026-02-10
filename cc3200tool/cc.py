@@ -680,6 +680,7 @@ class CC3200Connection(object):
         self._sop2 = sop2
         self._erase_timeout = erase_timeout
         self._image_file = None
+        self._image_file_size = 0
         self._output_file = None
         
         self.vinfo = None
@@ -687,6 +688,7 @@ class CC3200Connection(object):
         
         if not image_file is None:
             self._image_file = open(image_file, 'rb')
+            self._image_file_size = os.path.getsize(image_file)
         if not output_file is None:
             self._output_file = open(output_file, 'w+b')
 
@@ -849,7 +851,8 @@ class CC3200Connection(object):
                      .join([hex(x) for x in sinfo]))
             return CC3x00StorageInfo.from_packet(sinfo)
 
-        return CC3x00StorageInfo(SLFS_BLOCK_SIZE, 1024) #TODO: as parameter
+        if storage_id == STORAGE_ID_SFLASH:
+            return CC3x00StorageInfo(SLFS_BLOCK_SIZE, self._image_file_size / SLFS_BLOCK_SIZE)
 
     def _erase_blocks(self, start, count, storage_id=STORAGE_ID_SRAM):
         command = OPCODE_RAW_STORAGE_ERASE + \
