@@ -1256,6 +1256,7 @@ class CC3200Connection(object):
 
         self._raw_write(8, data[8:], storage_id=STORAGE_ID_SFLASH)
         self._raw_write(0, data[:8], storage_id=STORAGE_ID_SFLASH)
+        return data_len
 
     def read_flash(self, image_file, offset, size, ignore_max_size=False):
         data = self._raw_read(offset, size, storage_id=STORAGE_ID_SFLASH, ignore_max_size=ignore_max_size)
@@ -1546,11 +1547,13 @@ def main():
             cc.erase_file(command.filename)
 
         if command.cmd == "write_flash":
-            cc.write_flash(command.gang_image_file, not command.no_erase)
+            log.info("Writing flash...")
+            size = cc.write_flash(command.gang_image_file, not command.no_erase)
+            log.info("Flash written, size=%d" % size)
             if not command.no_verify:
                 log.info("Verify flash write by reading...")
                 tmpFile = tempfile.NamedTemporaryFile(mode='w+b')
-                cc.read_flash(tmpFile, 0, -1)
+                cc.read_flash(tmpFile, 0, size)
                 tmpFile.seek(0)
                 command.gang_image_file.seek(0)
                 if tmpFile.read() == command.gang_image_file.read():
