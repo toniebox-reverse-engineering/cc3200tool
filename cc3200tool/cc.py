@@ -1073,7 +1073,7 @@ class CC3200Connection(object):
         command = OPCODE_SWITCH_2_APPS + struct.pack(">I", 26666667)
         self._send_packet(command)
         log.info("Resetting communications ...")
-        time.sleep(self._reset_wait / 1000.0)
+        time.sleep(1)
         self._try_breaking()
         self.vinfo_apps = self._get_version()
 
