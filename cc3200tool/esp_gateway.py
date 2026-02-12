@@ -6,31 +6,85 @@ import logging
 log = logging.getLogger()
 
 class EspSerial:
-    # LOG packet constants
-    LOG_MAGIC = bytes([0x4C, 0x4F, 0x47, 0x4D, 0x53, 0x47, 0x01, 0x00])
-    LOG_HEADER_SIZE = len(LOG_MAGIC) + 4 + len(LOG_MAGIC)
-    LOG_INV_OFFSET = len(LOG_MAGIC) + 4
-    LOGMSG_MAX_LEN = 256
+    # Packet header constants
+    PACKET_HEADER_SIZE = 4
+    PACKET_TYPE_DATA = 0x00
+    PACKET_TYPE_CONFIG = 0x01
+    PACKET_TYPE_CONTROL = 0x02
+    PACKET_TYPE_LOG = 0x03
+    
+    # Extended mode magic (length=12, type=0x0A, payload="UARTGWEX")
+    EXTMODE_MAGIC = bytes([
+        0x0C, 0x00,  # length
+        0x0A, 0x00,  # type
+        0x55, 0x41, 0x52, 0x54, # U A R T
+        0x47, 0x57, 0x45, 0x58  # G W E X
+    ])
 
-    # CONTROL packet constants
-    CTRL_MAGIC = bytes([0x43, 0x54, 0x52, 0x4C, 0x47, 0x57, 0x01, 0x00])
-    CTRL_PACKET_SIZE = len(CTRL_MAGIC) + 16 + len(CTRL_MAGIC)
-    CTRL_INV_OFFSET = len(CTRL_MAGIC) + 16
-    CTRL_PADDED_SIZE = 64
+    CTRL_CMD_SIZE = 16
 
     def __init__(self, port, baudrate, timeout=None, **kwargs):
-        # inter_byte_timeout ensures reads return quickly once data stops arriving,
-        # instead of blocking until the full read_size is received.
         self.serial = serial.Serial(
-            port, baudrate=baudrate, timeout=timeout or 10,
-            inter_byte_timeout=0.1, **kwargs)
+                    port, baudrate=baudrate, parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE, timeout=timeout, inter_byte_timeout=0.01)
+        
         # Ensure ESP32 itself is not held in reset/bootloader mode
-        self.serial.dtr = True
+        self.serial.dtr = False
         self.serial.rts = False
+        
         self.rx_buffer = bytearray()
         self._internal_buffer = bytearray()
-        self._dtr_state = True
+        self._dtr_state = False
         self._rts_state = False
+        self.extended_mode = False
+        
+        # Proactively activate extended mode
+        self._activate_extended_mode()
+
+    def _activate_extended_mode(self):
+        log.debug(f"Activating ESP Gateway Extended Mode with magic: {self.EXTMODE_MAGIC.hex()}")
+        # Flush any junk first
+        self.serial.reset_input_buffer()
+        self.serial.write(self.EXTMODE_MAGIC)
+        self.serial.flush()
+        self.extended_mode = True
+        
+        # Wait a bit for ESP to process and clear its own internal state
+        time.sleep(0.5)
+        
+        # HTML implementation requests config (12 bytes of 0s)
+        self._request_config()
+        time.sleep(0.1)
+        
+        # And also sets config with current baudrate
+        self._update_baudrate(self.serial.baudrate)
+        time.sleep(0.1)
+
+    def _request_config(self):
+        log.debug("Requesting ESP Gateway configuration...")
+        # HTML requestConfig sends 12 bytes of 0
+        payload = bytearray(12)
+        pkt = self._build_packet(payload, self.PACKET_TYPE_CONFIG)
+        self.serial.write(pkt)
+        self.serial.flush()
+
+    def _update_baudrate(self, baudRate):
+        log.debug(f"Updating ESP Gateway baudrate to {baudRate}")
+        # Build 12-byte payload from config structure
+        payload = bytearray(12)
+        
+        # baud_rate at offset 0-3 (little-endian)
+        payload[0] = baudRate & 0xFF
+        payload[1] = (baudRate >> 8) & 0xFF
+        payload[2] = (baudRate >> 16) & 0xFF
+        payload[3] = (baudRate >> 24) & 0xFF
+        
+        # extended_mode at offset 11
+        payload[11] = 0x01
+        
+        pkt = self._build_packet(payload, self.PACKET_TYPE_CONFIG)
+        self.serial.write(pkt)
+        self.serial.flush()
 
     @property
     def timeout(self):
@@ -62,11 +116,9 @@ class EspSerial:
 
     @rts.setter
     def rts(self, value):
-        """
-        Ignore RTS changes (SOP2) as requested by user.
-        """
         self._rts_state = value
-        # No-op
+        cmd = b"C:1" if value else b"C:0"
+        self._send_control_packet(cmd)
 
     def close(self):
         self.serial.close()
@@ -76,50 +128,62 @@ class EspSerial:
         self.rx_buffer = bytearray()
         self._internal_buffer = bytearray()
 
-    def write(self, data):
-        # log.info(f"ESP TX Raw: {data.hex()}")
-        # Check for control packets (reset/break) vs data
-        # Simply log snippet
-        if len(data) > 0:
-             log.info(f"ESP TX Raw: {data.hex()[:50]}...")
-        ret = self.serial.write(data)
-        self.serial.flush()
-        return ret
+    def _build_packet(self, payload, type):
+        length = len(payload) + self.PACKET_HEADER_SIZE
+        header = bytes([
+            length & 0xFF,
+            (length >> 8) & 0xFF,
+            type & 0xFF,
+            (type >> 8) & 0xFF
+        ])
+        return header + payload
 
-    def send_break(self, duration=0.25):
+    def write(self, data):
+        if not self.extended_mode:
+            return self.serial.write(data)
+            
+        # Fragment into 64k chunks if needed
+        max_payload = 65530
+        offset = 0
+        total_written = 0
+        while offset < len(data):
+            chunk = data[offset:offset+max_payload]
+            pkt = self._build_packet(chunk, self.PACKET_TYPE_DATA)
+            # Only log small data or snippets to keep logs readable
+            if len(chunk) < 32:
+                log.debug(f"ESP TX data packet (len={len(chunk)}): {chunk.hex()}")
+            else:
+                log.debug(f"ESP TX data packet (len={len(chunk)}): {chunk.hex()[:64]}...")
+            self.serial.write(pkt)
+            offset += len(chunk)
+            total_written += len(chunk)
+        
+        self.serial.flush()
+        return total_written
+
+    def send_break(self, duration=0.2):
         """
         Send Break condition via Control Packet.
-        B:255 sends 255 bit-times of break at the current baud rate.
         """
-        self._send_control_packet(b"B:255")
+        total_bits = int(duration * 1000)
+        cmd = f"B:{total_bits}"
+        self._send_control_packet(cmd)
         time.sleep(duration)
 
-    def _pad_to_64(self, packet):
-        if len(packet) >= self.CTRL_PADDED_SIZE:
-            return packet
-        return packet + b'\x00' * (self.CTRL_PADDED_SIZE - len(packet))
-
-    def _build_control_packet(self, command):
-        # Command should be bytes
+    def _send_control_packet(self, command, flush=True, silent=False):
         if isinstance(command, str):
             command = command.encode('ascii')
             
-        packet = bytearray(self.CTRL_PACKET_SIZE)
-        packet[0:len(self.CTRL_MAGIC)] = self.CTRL_MAGIC
+        payload = bytearray(self.CTRL_CMD_SIZE)
+        cmd_len = min(len(command), self.CTRL_CMD_SIZE)
+        payload[:cmd_len] = command[:cmd_len]
         
-        cmd_len = min(len(command), 16)
-        packet[len(self.CTRL_MAGIC):len(self.CTRL_MAGIC)+cmd_len] = command[:cmd_len]
-        
-        # Inverted Magic
-        for i in range(len(self.CTRL_MAGIC)):
-            packet[self.CTRL_INV_OFFSET + i] = self.CTRL_MAGIC[i] ^ 0xFF
-            
-        return self._pad_to_64(packet)
-
-    def _send_control_packet(self, command):
-        pkt = self._build_control_packet(command)
-        #log.info(f"ESP CTRL TX: {command} -> {pkt.hex()}")
+        pkt = self._build_packet(payload, self.PACKET_TYPE_CONTROL)
+        if not silent:
+            log.debug(f"ESP TX control packet: {command} -> {pkt.hex()}")
         self.serial.write(pkt)
+        if flush:
+            self.serial.flush()
 
     def read(self, size=1):
         """
@@ -128,7 +192,6 @@ class EspSerial:
         start_time = time.time()
         
         while len(self.rx_buffer) < size:
-            # Calculate remaining timeout
             remaining = None
             if self.serial.timeout is not None:
                 elapsed = time.time() - start_time
@@ -136,127 +199,66 @@ class EspSerial:
                 if remaining <= 0:
                     break
             
-            # Read chunk
-            read_size = size - len(self.rx_buffer) + 64  # small over-read for LOG headers
-            # Use original timeout for the read call if no specialized timeout logic needed
-            # but we need to respect the overall timeout for the `read` operation.
-            # serial.read respects its timeout. If we loop, we need to adjust.
-            
-            # Save original timeout
             orig_timeout = self.serial.timeout
             if remaining is not None:
                 self.serial.timeout = remaining
                 
-            chunk = self.serial.read(read_size)
-            
-            # Restore timeout
+            # Read a decent chunk
+            chunk = self.serial.read(max(size - len(self.rx_buffer), 128))
             self.serial.timeout = orig_timeout
             
-            if not chunk:
+            if chunk:
+                log.debug(f"ESP RX raw: {chunk.hex()}")
+                self._process_rx_chunk(chunk)
+            else:
                 break
                 
-            try:
-                log.info(f"ESP RX Raw: {chunk.hex()[:100]}{'...' if len(chunk)>50 else ''}")
-            except:
-                pass
-            self._process_rx_chunk(chunk)
-            
         ret = bytes(self.rx_buffer[:size])
         del self.rx_buffer[:size]
-        # if ret:
-        #    log.debug(f"ESP Read Returning: {ret.hex()}")
         return ret
-
-
-    def _check_magic(self, buffer, offset, magic, inverted):
-        for i in range(len(magic)):
-            expected = (magic[i] ^ 0xFF) if inverted else magic[i]
-            if buffer[offset + i] != expected:
-                return False
-        return True
 
     def _process_rx_chunk(self, chunk):
         self._internal_buffer.extend(chunk)
         
-        while True:
-            # Look for magic
-            # Only search for magic if we have enough data to potentially be confused
-            # Optimization: simple find
-            
-            magic_idx = self._internal_buffer.find(self.LOG_MAGIC)
-            
-            if magic_idx == -1:
-                # No complete magic found.
-                # Check for partial match at the end
-                buf_len = len(self._internal_buffer)
-                if buf_len == 0:
-                    break
-                    
-                match_len = 0
-                # Check trailing bytes against start of LOG_MAGIC
-                # Max overlap is len(LOG_MAGIC)-1
-                for i in range(min(buf_len, len(self.LOG_MAGIC)-1), 0, -1):
-                    if self._internal_buffer[-i:] == self.LOG_MAGIC[:i]:
-                        match_len = i
-                        break
-                
-                # Available data is everything up to the potential start of magic
-                avail_len = buf_len - match_len
-                if avail_len > 0:
-                    self.rx_buffer.extend(self._internal_buffer[:avail_len])
-                    del self._internal_buffer[:avail_len]
-                
-                # We kept the partial match. Done processing for now.
-                break
+        if not self.extended_mode:
+            self.rx_buffer.extend(self._internal_buffer)
+            self._internal_buffer = bytearray()
+            return
 
-            if magic_idx > 0:
-                # We have data before the magic
-                self.rx_buffer.extend(self._internal_buffer[:magic_idx])
-                del self._internal_buffer[:magic_idx]
-                continue
+        while len(self._internal_buffer) >= self.PACKET_HEADER_SIZE:
+            length = self._internal_buffer[0] | (self._internal_buffer[1] << 8)
+            type = self._internal_buffer[2] | (self._internal_buffer[3] << 8)
             
-            # magic_idx == 0. Starts with LOG_MAGIC.
-            # Check we have enough for header
-            if len(self._internal_buffer) < self.LOG_HEADER_SIZE:
-                break # Wait for more data
-                
-            # Verify inverted magic (robustness check)
-            if not self._check_magic(self._internal_buffer, self.LOG_INV_OFFSET, self.LOG_MAGIC, True):
-                # Not a valid packet (maybe coincidentally matched magic bytes, or corrupt)
-                # Discard 1 byte and retry search
-                # log.warning("Invalid LOG packet magic, skipping 1 byte")
-                self.rx_buffer.append(self._internal_buffer[0])
+            log.debug(f"ESP RX packet header: len={length}, type={type:04x}")
+
+            if length < 4 or length > 65535:
+                # Invalid packet, discard 1 byte and resync
+                log.warning(f"ESP RX invalid length {length}, discarding 1 byte")
                 del self._internal_buffer[0]
                 continue
                 
-            # Parse length
-            payload_len = (self._internal_buffer[8] | 
-                          (self._internal_buffer[9] << 8) | 
-                          (self._internal_buffer[10] << 16) | 
-                          (self._internal_buffer[11] << 24))
-            
-            # Sanity check length
-            if payload_len < 0 or payload_len > self.LOGMSG_MAX_LEN:
-                 # Invalid length
-                 log.warning(f"Invalid LOG packet length: {payload_len}")
-                 self.rx_buffer.append(self._internal_buffer[0])
-                 del self._internal_buffer[0]
-                 continue
-                 
-            total_len = self.LOG_HEADER_SIZE + payload_len
-            if len(self._internal_buffer) < total_len:
+            if len(self._internal_buffer) < length:
+                log.debug(f"ESP RX incomplete packet: have {len(self._internal_buffer)}, need {length}")
                 break # Wait for more data
                 
-            # Extract Packet
-            msg_bytes = self._internal_buffer[self.LOG_HEADER_SIZE : total_len]
-            try:
-                # Log to stderr
-                log_msg = msg_bytes.decode('utf-8', errors='replace')
-                sys.stderr.write(f"\\r[ESP32] {log_msg}") 
-                if not log_msg.endswith('\\n'):
-                    sys.stderr.write('\\n')
-            except Exception:
+            payload = self._internal_buffer[self.PACKET_HEADER_SIZE : length]
+            del self._internal_buffer[:length]
+            
+            if type == self.PACKET_TYPE_DATA:
+                log.debug(f"ESP RX data packet (len={len(payload)}): {payload.hex()}")
+                self.rx_buffer.extend(payload)
+            elif type == self.PACKET_TYPE_LOG:
+                try:
+                    log_msg = payload.decode('utf-8', errors='replace')
+                    sys.stderr.write(f"\n[ESP32] {log_msg}") 
+                    if not log_msg.endswith('\n'):
+                        sys.stderr.write('\n')
+                except:
+                    pass
+            elif type == self.PACKET_TYPE_CONFIG:
+                log.debug(f"ESP RX config packet: {payload.hex()}")
+                self._current_config = payload
                 pass
-                
-            # Consume packet
-            del self._internal_buffer[:total_len]
+            else:
+                log.warning(f"ESP RX unknown packet type {type:04x}: {payload.hex()}")
+                self.rx_buffer.extend(payload)
