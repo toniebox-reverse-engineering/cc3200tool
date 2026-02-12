@@ -206,6 +206,9 @@ parser.add_argument(
 parser.add_argument(
         "-g", "--gateway", action="store_true",
         help="Use ESP32 Gateway (overalys Serial class)")
+parser.add_argument(
+        "-rw", "--reset-wait", type=auto_int, default=1000,
+        help="Wait time after reset in ms (default 1000ms)")
 
 subparsers = parser.add_subparsers(dest="cmd")
 
@@ -675,7 +678,7 @@ class CC3200Connection(object):
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
 
-    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None, output_file=None):
+    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None, output_file=None, reset_wait=1000):
         self.port = port
         if not self.port is None:
             port.timeout = self.TIMEOUT
@@ -686,6 +689,7 @@ class CC3200Connection(object):
         self._image_file = None
         self._image_file_size = 0
         self._output_file = None
+        self._reset_wait = reset_wait
         
         self.vinfo = None
         self.vinfo_apps = None
@@ -1025,6 +1029,7 @@ class CC3200Connection(object):
         log.info("Connecting to target...")
         self.port.flushInput()
         self._do_reset(True)
+        time.sleep(self._reset_wait / 1000.0)
         self._try_breaking()
         log.info("Connected, reading version...")
         self.vinfo = self._get_version()
@@ -1068,7 +1073,7 @@ class CC3200Connection(object):
         command = OPCODE_SWITCH_2_APPS + struct.pack(">I", 26666667)
         self._send_packet(command)
         log.info("Resetting communications ...")
-        time.sleep(1)
+        time.sleep(self._reset_wait / 1000.0)
         self._try_breaking()
         self.vinfo_apps = self._get_version()
 
@@ -1485,7 +1490,7 @@ def main():
     port_name = args.port
 
     if not args.image_file is None:
-        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, device=args.device, image_file=args.image_file, output_file=args.output_file)
+        cc = CC3200Connection(None, reset_method, sop2_method, erase_timeout=args.erase_timeout, device=args.device, image_file=args.image_file, output_file=args.output_file, reset_wait=args.reset_wait)
     
     else:
         try:
@@ -1502,7 +1507,7 @@ def main():
             log.warn("unable to open serial port %s: %s", port_name, e)
             sys.exit(-2)
 
-        cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout)
+        cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout, reset_wait=args.reset_wait)
         try:
             cc.connect()
             log.info("connected to target")
