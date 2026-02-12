@@ -64,6 +64,10 @@ Useful commands: (THIS WIPES YOUR FLASH, DON'T DO THAT WITHOUT A BACKUP)
     write_file --no-verify --signature ota_1.0.1.13-2.11.0.1.ucf.signed.bin ota_1.0.1.13-2.11.0.1.ucf /sys/servicepack.ucf 
     write_all_files flash_files/
 
+## ESP32 Gateway
+
+To use the ESP32 Gateway as UART interface, you need to flash the gateway firmware to the ESP32 first.
+After that you can use the ESP32 Gateway as UART interface for the CC3200. Just append the --gateway flag to the cc3200tool after the -p flag.
 
 ## Usage
 
