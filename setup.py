@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name="cc3200tool",
-    version="1.2.4",
+    version="1.3.0",
     description="A tool to down-/upload files form/to TI CC3200",
     author="Kiril Zyapkov, 0xbadbee",
     author_email="k.zyapkov@allterco.com",
