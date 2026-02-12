@@ -205,7 +205,7 @@ parser.add_argument(
         help="Device to select cc3200/cc32xx (to decide which offsets to use)")
 parser.add_argument(
         "-g", "--gateway", action="store_true",
-        help="Use ESP32 Gateway (overalys Serial class)")
+        help="Use ESP32 Gateway as UART interface. (Needs to be flashed with gateway firmware first)")
 parser.add_argument(
         "-rw", "--reset-wait", type=auto_int, default=1000,
         help="Wait time after reset in ms (default 1000ms)")
