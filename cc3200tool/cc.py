@@ -31,7 +31,10 @@ from collections import namedtuple
 import json
 
 import serial
-from .esp_gateway import EspSerial
+try:
+    from .esp_gateway import EspSerial
+except Exception:
+    from esp_gateway import EspSerial # allow running cc.py directly as a script (no package context)
 
 log = logging.getLogger()
 logging.basicConfig(stream=sys.stderr, level=logging.INFO,
