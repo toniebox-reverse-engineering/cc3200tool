@@ -1103,7 +1103,7 @@ class CC3200Connection(object):
         if not force:
             finfo = self._get_file_info(filename)
             if not finfo.exists:
-                log.warn("File '%s' does not exist, won't erase", filename)
+                log.warning("File '%s' does not exist, won't erase", filename)
                 return
 
         log.info("Erasing file %s...", filename)
@@ -1120,7 +1120,7 @@ class CC3200Connection(object):
         file_len = len(file_data)
 
         if not file_len:
-            log.warn("Won't upload empty file")
+            log.warning("Won't upload empty file")
             return
 
         sign_data = None
@@ -1507,7 +1507,7 @@ def main():
                     port_name, baudrate=CC3200_BAUD, parity=serial.PARITY_NONE,
                     stopbits=serial.STOPBITS_ONE)
         except (Exception, ) as e:
-            log.warn("unable to open serial port %s: %s", port_name, e)
+            log.warning("unable to open serial port %s: %s", port_name, e)
             sys.exit(-2)
 
         cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout, reset_wait=args.reset_wait)
