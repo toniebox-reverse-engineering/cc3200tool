@@ -189,23 +189,9 @@ class EspSerial:
         """
         Read 'size' bytes from the stream, filtering out LOG packets.
         """
-        start_time = time.time()
-        
         while len(self.rx_buffer) < size:
-            remaining = None
-            if self.serial.timeout is not None:
-                elapsed = time.time() - start_time
-                remaining = self.serial.timeout - elapsed
-                if remaining <= 0:
-                    break
-            
-            orig_timeout = self.serial.timeout
-            if remaining is not None:
-                self.serial.timeout = remaining
-                
             # Read a decent chunk
-            chunk = self.serial.read(max(size - len(self.rx_buffer), 128))
-            self.serial.timeout = orig_timeout
+            chunk = self.serial.read(min(size - len(self.rx_buffer), 256))
             
             if chunk:
                 log.debug(f"ESP RX raw: {chunk.hex()}")
