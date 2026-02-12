@@ -813,7 +813,7 @@ class CC3200Connection(object):
         self.port.send_break(.2)
         return self._read_ack(timeout)
 
-    def _try_breaking(self, tries=5, timeout=2):
+    def _try_breaking(self, tries=5, timeout=1):
         for _ in range(tries):
             if self._do_break(timeout):
                 break
@@ -1025,7 +1025,7 @@ class CC3200Connection(object):
         log.info("Connecting to target...")
         self.port.flushInput()
         self._do_reset(True)
-        self._try_breaking(tries=5, timeout=2)
+        self._try_breaking()
         log.info("Connected, reading version...")
         self.vinfo = self._get_version()
 
