@@ -680,6 +680,7 @@ class CC3200Connection(object):
     SFFS_FAT_METADATA2_LENGTH = 0x1000
     SFFS_FAT_PART_OFFSET = 0x1000
     SFFS_FAT_FILE_HEADER_SIZE = 0x8
+    SYSTEM_FILES_BLACKLIST = ["/sys/servicepack.ucf"]
 
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
@@ -1363,7 +1364,8 @@ class CC3200Connection(object):
     def read_all_files(self, local_dir, by_file_id=False, all_by_file_id=False, inactive=False, no_verify=False):
         fat_info = self.get_fat_info(inactive=inactive)
         fat_info.print_sffs_info()
-        has_error = False
+        errors = []
+        skipped = []
 
         if not os.path.exists(local_dir):
             os.makedirs(local_dir)
@@ -1377,12 +1379,18 @@ class CC3200Connection(object):
                 if by_file_id:
                     ccname = str(f.index)
                 else:
-                    log.error("Found file without filename, skipping index=%i", f.index)
-                    has_error = True
+                    msg = "Found file without filename, skipping index=%i" % f.index
+                    log.error(msg)
+                    errors.append(msg)
                     continue
                                 
             if ccname.startswith('/'):
                 ccname = ccname[1:]
+
+            full_ccname = f.fname if f.fname.startswith('/') else '/' + f.fname
+            if full_ccname in self.SYSTEM_FILES_BLACKLIST:
+                skipped.append(f.fname)
+                continue
 
             target_file = os.path.join(local_dir, ccname) 
             if all_by_file_id:
@@ -1407,13 +1415,21 @@ class CC3200Connection(object):
                     if tmpFile.read() == open(target_file, 'rb').read():
                         log.info("File %s verified" % target_file)
                     else:
-                        log.error("File %s could not be verified" % target_file)
-                        has_error = True
+                        msg = "File %s could not be verified" % target_file
+                        log.error(msg)
+                        errors.append(msg)
             except Exception as ex:
-                log.error("File %s could not be read, %s" % (f.fname, str (ex)))
-                has_error = True
+                msg = "File %s could not be read, %s" % (f.fname, str (ex))
+                log.error(msg)
+                errors.append(msg)
 
-        if has_error:
+        if skipped:
+            log.info("Skipped blacklisted files: %s", ", ".join(skipped))
+
+        if errors:
+            log.error("The following files had errors:")
+            for error in errors:
+                log.error("  %s", error)
             log.error("One or more files could not be verified or read at all")
             sys.exit(-4)
 
