@@ -66,7 +66,7 @@ Useful commands: (THIS WIPES YOUR FLASH, DON'T DO THAT WITHOUT A BACKUP)
 
 ## ESP32 Gateway
 
-To use the ESP32 Gateway as UART interface, you need to flash the gateway firmware to the ESP32 first.
+To use the [ESP32 Gateway](https://github.com/g3gg0/ESP32-UART-Gateway) as UART interface, you need to flash the gateway firmware to the ESP32 first.
 After that you can use the ESP32 Gateway as UART interface for the CC3200. Just append the --gateway flag to the cc3200tool after the -p flag.
 
 ## Usage
