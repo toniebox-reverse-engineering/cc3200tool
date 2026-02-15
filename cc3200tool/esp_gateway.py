@@ -26,17 +26,16 @@ class EspSerial:
     def __init__(self, port, baudrate, timeout=None, **kwargs):
         self.serial = serial.Serial(
                     port, baudrate=baudrate, parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE, timeout=timeout, inter_byte_timeout=0.01)
+                    stopbits=serial.STOPBITS_ONE, timeout=timeout)
         
         # Ensure ESP32 itself is not held in reset/bootloader mode
         self.serial.dtr = False
         self.serial.rts = False
         
         self.rx_buffer = bytearray()
-        self._internal_buffer = bytearray()
         self._dtr_state = False
         self._rts_state = False
-        self.extended_mode = False
+        self._current_config = None
         
         # Proactively activate extended mode
         self._activate_extended_mode()
@@ -47,7 +46,6 @@ class EspSerial:
         self.serial.reset_input_buffer()
         self.serial.write(self.EXTMODE_MAGIC)
         self.serial.flush()
-        self.extended_mode = True
         
         # Wait a bit for ESP to process and clear its own internal state
         time.sleep(0.5)
@@ -126,7 +124,6 @@ class EspSerial:
     def flushInput(self):
         self.serial.reset_input_buffer()
         self.rx_buffer = bytearray()
-        self._internal_buffer = bytearray()
 
     def _build_packet(self, payload, type):
         length = len(payload) + self.PACKET_HEADER_SIZE
@@ -139,9 +136,6 @@ class EspSerial:
         return header + payload
 
     def write(self, data):
-        if not self.extended_mode:
-            return self.serial.write(data)
-            
         # Fragment into 64k chunks if needed
         max_payload = 65530
         offset = 0
@@ -187,64 +181,62 @@ class EspSerial:
 
     def read(self, size=1):
         """
-        Read 'size' bytes from the stream, filtering out LOG packets.
+        Read 'size' bytes from the buffer. If buffer is empty, fetch more packets.
         """
         while len(self.rx_buffer) < size:
-            # Read a decent chunk
-            chunk = self.serial.read(min(size - len(self.rx_buffer), 256))
-            
-            if chunk:
-                log.debug(f"ESP RX raw: {chunk.hex()}")
-                self._process_rx_chunk(chunk)
-            else:
-                break
+            if not self._process_rx_packet():
+                break # Timeout
                 
         ret = bytes(self.rx_buffer[:size])
         del self.rx_buffer[:size]
         return ret
 
-    def _process_rx_chunk(self, chunk):
-        self._internal_buffer.extend(chunk)
+    def _process_rx_packet(self):
+        """
+        Read one full packet from the serial port.
+        Returns True if a packet was processed, False on timeout.
+        """
+        # 1. Read header (4 bytes)
+        header = self.serial.read(self.PACKET_HEADER_SIZE)
+        if len(header) < self.PACKET_HEADER_SIZE:
+            return False
+
+        length = header[0] | (header[1] << 8)
+        type = header[2] | (header[3] << 8)
         
-        if not self.extended_mode:
-            self.rx_buffer.extend(self._internal_buffer)
-            self._internal_buffer = bytearray()
-            return
+        log.debug(f"ESP RX packet header: len={length}, type={type:04x}")
 
-        while len(self._internal_buffer) >= self.PACKET_HEADER_SIZE:
-            length = self._internal_buffer[0] | (self._internal_buffer[1] << 8)
-            type = self._internal_buffer[2] | (self._internal_buffer[3] << 8)
+        if length < 4:
+            # Invalid packet length, should not happen. 
+            # We might need to resync if this occurs, but for now just return.
+            return False
             
-            log.debug(f"ESP RX packet header: len={length}, type={type:04x}")
+        # 2. Read payload
+        payload_len = length - self.PACKET_HEADER_SIZE
+        payload = self.serial.read(payload_len)
+        if len(payload) < payload_len:
+            # Incomplete packet
+            return False
 
-            if length < 4 or length > 65535:
-                # Invalid packet, discard 1 byte and resync
-                log.warning(f"ESP RX invalid length {length}, discarding 1 byte")
-                del self._internal_buffer[0]
-                continue
-                
-            if len(self._internal_buffer) < length:
-                log.debug(f"ESP RX incomplete packet: have {len(self._internal_buffer)}, need {length}")
-                break # Wait for more data
-                
-            payload = self._internal_buffer[self.PACKET_HEADER_SIZE : length]
-            del self._internal_buffer[:length]
-            
-            if type == self.PACKET_TYPE_DATA:
-                log.debug(f"ESP RX data packet (len={len(payload)}): {payload.hex()}")
-                self.rx_buffer.extend(payload)
-            elif type == self.PACKET_TYPE_LOG:
-                try:
-                    log_msg = payload.decode('utf-8', errors='replace')
-                    sys.stderr.write(f"\n[ESP32] {log_msg}") 
-                    if not log_msg.endswith('\n'):
-                        sys.stderr.write('\n')
-                except:
-                    pass
-            elif type == self.PACKET_TYPE_CONFIG:
-                log.debug(f"ESP RX config packet: {payload.hex()}")
-                self._current_config = payload
+        # 3. Process payload based on type
+        if type == self.PACKET_TYPE_DATA:
+            log.debug(f"ESP RX data packet (len={len(payload)}): {payload.hex()}")
+            self.rx_buffer.extend(payload)
+        elif type == self.PACKET_TYPE_LOG:
+            try:
+                log_msg = payload.decode('utf-8', errors='replace')
+                sys.stderr.write(f"\n[ESP32] {log_msg}") 
+                if not log_msg.endswith('\n'):
+                    sys.stderr.write('\n')
+            except:
                 pass
-            else:
-                log.warning(f"ESP RX unknown packet type {type:04x}: {payload.hex()}")
-                self.rx_buffer.extend(payload)
+        elif type == self.PACKET_TYPE_CONFIG:
+            log.debug(f"ESP RX config packet: {payload.hex()}")
+            self._current_config = payload
+        else:
+            log.warning(f"ESP RX unknown packet type {type:04x}: {payload.hex()}")
+            # Treat unknown as data for robustness? Or just discard?
+            # User request says "make more robust", usually means don't crash on unknowns.
+            self.rx_buffer.extend(payload)
+            
+        return True
