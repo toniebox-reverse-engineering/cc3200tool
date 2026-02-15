@@ -212,6 +212,9 @@ parser.add_argument(
 parser.add_argument(
         "-rw", "--reset-wait", type=auto_int, default=1000,
         help="Wait time after reset in ms (default 1000ms)")
+parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose output")
 
 subparsers = parser.add_subparsers(dest="cmd")
 
@@ -1477,6 +1480,10 @@ def main():
         sys.exit(-1)
 
     args = commands[0]
+
+    if (args.verbose):
+        log.setLevel(logging.DEBUG)
+        log.debug("Verbose mode enabled")
 
     sop2_method = args.sop2
     reset_method = args.reset
