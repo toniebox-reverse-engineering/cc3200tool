@@ -69,6 +69,19 @@ Useful commands: (THIS WIPES YOUR FLASH, DON'T DO THAT WITHOUT A BACKUP)
 To use the [ESP32 Gateway](https://github.com/g3gg0/ESP32-UART-Gateway) as UART interface, you need to flash the gateway firmware to the ESP32 first.
 After that you can use the ESP32 Gateway as UART interface for the CC3200. Just append the --gateway flag to the cc3200tool after the -p flag.
 
+## USB-UART adapters that cannot send a break
+
+The bootloader is started by a UART break (TX held low). Some adapters,
+notably many cheap FT232RL clones, ignore the break request, which shows up as
+`Did not get ACK on break condition` even though reset and wiring are fine.
+
+By default (`--break-mode auto`) cc3200tool then retries with an emulated
+break: it briefly switches to 300 baud and sends a NUL byte, which holds TX low
+for about 30 ms. If you know your adapter needs this, use
+`--break-mode emulate` to skip the failing hardware break attempts, or
+`--break-mode hw` to disable the fallback. The emulated break is not available
+in ESP32 Gateway mode.
+
 ## Usage
 
 You need a serial port connected to the target's UART interface. For
