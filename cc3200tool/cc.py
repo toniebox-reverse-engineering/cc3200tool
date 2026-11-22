@@ -42,6 +42,13 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO,
 
 CC3200_BAUD = 921600
 
+# Many FT232RL clones ignore the break request and never pull TX low.
+# The break is then emulated by sending a NUL byte at a low baud rate,
+# which keeps TX low for ~30 ms (start bit + 8 zero data bits).
+BREAK_MODES = ("auto", "hw", "emulate")
+EMULATED_BREAK_BAUD = 300
+EMULATED_BREAK_HOLD = 0.1
+
 # erasing blocks is time consuming and depends on flash type
 # so separate timeout value is used
 ERASE_TIMEOUT = 120
@@ -212,6 +219,13 @@ parser.add_argument(
 parser.add_argument(
         "-rw", "--reset-wait", type=auto_int, default=1000,
         help="Wait time after reset in ms (default 1000ms)")
+parser.add_argument(
+        "--break-mode", choices=BREAK_MODES, default="auto",
+        help="How to send the UART break that starts the bootloader: "
+             "hw uses the adapter's break signal, emulate holds TX low by "
+             "sending a NUL byte at a low baud rate (for adapters that cannot "
+             "send a break, e.g. many FT232RL clones), auto tries hw first and "
+             "falls back to emulate (default: auto)")
 parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Enable verbose output")
@@ -685,7 +699,9 @@ class CC3200Connection(object):
     TIMEOUT = 5
     DEFAULT_SLFS_SIZE = "1M"
 
-    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None, output_file=None, reset_wait=1000):
+    def __init__(self, port, reset=None, sop2=None, erase_timeout=ERASE_TIMEOUT, device=None, image_file=None, output_file=None, reset_wait=1000, break_mode="hw"):
+        if break_mode not in BREAK_MODES:
+            raise ValueError(f"invalid break mode: {break_mode}")
         self.port = port
         if not self.port is None:
             port.timeout = self.TIMEOUT
@@ -697,6 +713,8 @@ class CC3200Connection(object):
         self._image_file_size = 0
         self._output_file = None
         self._reset_wait = reset_wait
+        self._break_mode = break_mode
+        self._emulate_break = break_mode == "emulate"
         
         self.vinfo = None
         self.vinfo_apps = None
@@ -797,12 +815,15 @@ class CC3200Connection(object):
         self._send_ack()
         return data
 
-    def _send_packet(self, data, timeout=None):
-        assert len(data)
+    def _send_raw_packet(self, data):
         checksum = sum(data)
         len_blob = struct.pack(">H", len(data) + 2)
         csum = struct.pack("B", checksum & 0xff)
         self.port.write(len_blob + csum + data)
+
+    def _send_packet(self, data, timeout=None):
+        assert len(data)
+        self._send_raw_packet(data)
         if not self._read_ack(timeout):
             raise CC3200Error(
                     f"No ack for packet opcode=0x{data[0]:02x}")
@@ -821,8 +842,44 @@ class CC3200Connection(object):
         return CC3x00Status(0)
 
     def _do_break(self, timeout):
+        if self._emulate_break:
+            return self._do_emulated_break(timeout)
         self.port.send_break(.2)
         return self._read_ack(timeout)
+
+    def _do_emulated_break(self, timeout):
+        port = self.port
+        baudrate = port.baudrate
+        port.reset_input_buffer()
+        port.baudrate = EMULATED_BREAK_BAUD
+        try:
+            port.write(b'\x00')
+            port.flush()
+            time.sleep(EMULATED_BREAK_HOLD)
+        finally:
+            port.baudrate = baudrate
+
+        # The ACK for the break is lost (it is presumably sent while we are
+        # still at the low baud rate), and the first bytes received
+        # after switching back are sometimes garbled. Send GET_VERSION and
+        # acknowledge whatever comes back so the bootloader is not left
+        # waiting, then verify the link with a clean second GET_VERSION.
+        port.reset_input_buffer()
+        self._send_raw_packet(OPCODE_GET_VERSION_INFO)
+        with self._serial_timeout(min(timeout, 0.5)):
+            response = port.read(2 + 3 + 28)
+        if not response:
+            log.debug("no response after emulated break")
+            return False
+        self._send_ack()
+        time.sleep(0.01)
+        port.reset_input_buffer()
+        try:
+            self._get_version()
+        except CC3200Error as e:
+            log.debug("emulated break not confirmed: %s", e)
+            return False
+        return True
 
     def _try_breaking(self, tries=5, timeout=1):
         for _ in range(tries):
@@ -1035,11 +1092,33 @@ class CC3200Connection(object):
     def connect(self):
         log.info("Connecting to target...")
         self.port.flushInput()
+        self._reset_and_break()
+        log.info("Connected, reading version...")
+        self.vinfo = self._get_version()
+
+    def _reset_and_break(self):
+        self._do_reset(True)
+        time.sleep(self._reset_wait / 1000.0)
+        try:
+            self._try_breaking()
+            return
+        except CC3200Error as e:
+            if self._emulate_break:
+                raise
+            if self._break_mode == "hw":
+                raise CC3200Error(
+                    f"{e}. If the reset works, your adapter may not be able to "
+                    "send a UART break (common with FT232RL clones), "
+                    "try --break-mode emulate")
+
+        log.warning("No ACK on UART break, the adapter probably cannot send a "
+                    "break signal. Retrying with an emulated break; use "
+                    "--break-mode emulate to skip the hardware break next time.")
+        self._emulate_break = True
+        self.port.flushInput()
         self._do_reset(True)
         time.sleep(self._reset_wait / 1000.0)
         self._try_breaking()
-        log.info("Connected, reading version...")
-        self.vinfo = self._get_version()
 
     def reboot_to_app(self):
         log.info("Rebooting to application")
@@ -1508,6 +1587,12 @@ def main():
         log.info("Gateway Mode: Forcing Reset=DTR, SOP2=None")
         reset_method = Pincfg(False, 'dtr')
         sop2_method = Pincfg(False, 'none')
+        if args.break_mode == "emulate":
+            log.error("--break-mode emulate is not supported with the ESP32 Gateway")
+            sys.exit(-3)
+        break_mode = "hw"
+    else:
+        break_mode = args.break_mode
 
     if sop2_method.pin == reset_method.pin and reset_method.pin != 'none':
         log.error("sop2 and reset methods cannot be the same output pin")
@@ -1533,7 +1618,7 @@ def main():
             log.warning("unable to open serial port %s: %s", port_name, e)
             sys.exit(-2)
 
-        cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout, reset_wait=args.reset_wait)
+        cc = CC3200Connection(p, reset_method, sop2_method, erase_timeout=args.erase_timeout, reset_wait=args.reset_wait, break_mode=break_mode)
         try:
             cc.connect()
             log.info("connected to target")
